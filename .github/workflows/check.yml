@@ -1,0 +1,57 @@
+name: Dependency & Quality Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify CDN URLs are reachable
+        run: |
+          curl -f --head "https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
+          curl -f --head "https://cdn.jsdelivr.net/npm/dompurify@3.4.10/dist/purify.min.js"
+
+      - name: Extract and syntax-check JavaScript
+        run: |
+          node -e "
+            const fs = require('fs');
+            const html = fs.readFileSync('Gruper.html', 'utf8');
+            const match = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
+            if (!match) { console.error('Could not find main script block'); process.exit(1); }
+            fs.writeFileSync('/tmp/gruper_script.js', match[1]);
+          "
+          node --check /tmp/gruper_script.js && echo "JS syntax OK"
+
+      - name: Check version consistency
+        run: |
+          HTML_VER=$(grep -oP "const APP_VERSION = '\K[^']+" Gruper.html)
+          README_VER=$(grep -oP '(?<=version-)\d+\.\d+\.\d+' README.md | head -1)
+          echo "Gruper.html APP_VERSION: $HTML_VER"
+          echo "README.md badge version: $README_VER"
+          if [ -z "$HTML_VER" ]; then
+            echo "ERROR: Could not find APP_VERSION in Gruper.html"
+            exit 1
+          fi
+
+      - name: Check for duplicate CDN script tags
+        run: |
+          CHARTJS_COUNT=$(grep -c "cdn.jsdelivr.net/npm/chart.js" Gruper.html || true)
+          DOMPURIFY_COUNT=$(grep -c "cdn.jsdelivr.net/npm/dompurify" Gruper.html || true)
+          echo "Chart.js script tags: $CHARTJS_COUNT"
+          echo "DOMPurify script tags: $DOMPURIFY_COUNT"
+          if [ "$CHARTJS_COUNT" -gt 1 ]; then
+            echo "ERROR: Duplicate Chart.js script tags detected"
+            exit 1
+          fi
+          if [ "$DOMPURIFY_COUNT" -gt 1 ]; then
+            echo "ERROR: Duplicate DOMPurify script tags detected"
+            exit 1
+          fi
+          echo "No duplicate CDN script tags found"

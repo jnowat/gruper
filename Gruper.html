@@ -8,10 +8,8 @@
 
     <!-- See CHANGELOG.md for full version history -->
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-FhvbTO3MY8s3Ke97TPkFNzEhFy9lwD+RJJN6VHKPqKST/XF3SVSLxZKqE0RXHQJ5" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js" integrity="sha384-9RLVjZXV+d8bkxJpLiJZPEtHvzPvV7L0m6cGLAkLhkLvLCxPMpYnhZKJYpWyv0xM" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js" integrity="sha384-vdScihEZCfbPnBQf+lc7LgXUdJVYyhC3yWHUW5C5P5GpHRqVnaM6HJELJxT6IqwM" crossorigin="anonymous"></script>	
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.10/dist/purify.min.js" integrity="sha384-eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx" crossorigin="anonymous"></script>
 
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2441,7 +2439,7 @@
                     <!-- v0.2.0: Security Shield icon with tooltip -->
                     <span class="tooltip-wrapper" style="margin-left: 8px;">
                         <span style="font-size: 1.1em; cursor: help;" aria-label="Security features">🛡️</span>
-                        <span class="tooltip">Streamlined UX</span>
+                        <span class="tooltip">XSS protection via DOMPurify • Prompt injection defense • Safe HTML rendering</span>
                     </span>
                 </p>
             </div>
@@ -2873,7 +2871,11 @@ Example: What are the ethical considerations of AI in healthcare?"
         const debugEntries = [];
         const MAX_DEBUG_ENTRIES = 200;
         let isDebugPanelVisible = false;
-        
+
+        /* =================================================================
+           LOGGING & DEBUG
+           ================================================================= */
+
         /**
          * Central logging function
          */
@@ -3466,6 +3468,10 @@ Example: What are the ethical considerations of AI in healthcare?"
             { id: 'sidebar', icon: '◀', title: 'Toggle Sidebar', description: 'Collapse or expand the sidebar', action: () => toggleSidebar(), shortcut: 'S' }
         ];
         
+        /* =================================================================
+           STATE PERSISTENCE
+           ================================================================= */
+
         /**
          * Save state (v24-3 version)
          */
@@ -3482,7 +3488,23 @@ Example: What are the ethical considerations of AI in healthcare?"
                     connection: state.connection, // v0.4.1: Timeout config
                     ui: state.ui // v0.4.1: UI state (font scale, debug height)
                 };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+                } catch (quotaError) {
+                    if (quotaError.name === 'QuotaExceededError' || quotaError.code === 22) {
+                        logWarning('localStorage quota exceeded — freeing space and retrying');
+                        ['debugSearchTerm', 'debugLogHeight', 'debugAutoScroll'].forEach(k => localStorage.removeItem(k));
+                        try {
+                            localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+                        } catch (_) {
+                            logError('localStorage full — settings cannot be saved this session');
+                            showToast('Storage full: settings not saved. Export your data or clear browser storage.', { type: 'warning', duration: 8000 });
+                            return;
+                        }
+                    } else {
+                        throw quotaError;
+                    }
+                }
                 logDebug('State saved to localStorage');
             } catch (error) {
                 logError('Failed to save state', error);
@@ -4064,7 +4086,11 @@ Example: What are the ethical considerations of AI in healthcare?"
             });
         }
         
-       /**
+        /* =================================================================
+           CONVERSATION ENGINE
+           ================================================================= */
+
+        /**
          * Validate task input and update start button (v0.1.5)
          */
         function validateTaskInput() {
@@ -4585,6 +4611,10 @@ Example: What are the ethical considerations of AI in healthcare?"
             }
         }
         
+        /* =================================================================
+           RENDERING & DISPLAY
+           ================================================================= */
+
         function buildContext(agentId, conversation) {
             const agent = state.agents[agentId];
             const messages = [];
@@ -5275,7 +5305,10 @@ Keyboard Shortcuts:
             searchMessages('');
         }
 
-        // --- v0-1-2 Analytics ---
+        /* =================================================================
+           ANALYTICS
+           ================================================================= */
+
         function updateAnalytics() {
             document.getElementById('totalRounds').textContent = state.analytics.totalRounds;
             document.getElementById('totalMessages').textContent = state.analytics.totalMessages;
@@ -5555,7 +5588,10 @@ Keyboard Shortcuts:
             }
         }
 
-        // ── v0.4.0: FOCUS TRAPPING FOR ACCESSIBILITY ──
+        /* =================================================================
+           ACCESSIBILITY
+           ================================================================= */
+
         let focusTrapElements = [];
         let previousActiveElement = null;
 
@@ -5603,7 +5639,10 @@ Keyboard Shortcuts:
             focusTrapElements = [];
         }
 
-        // --- v0-1-2 Command Palette ---
+        /* =================================================================
+           COMMAND PALETTE
+           ================================================================= */
+
         function openCommandPalette() {
             const overlay = document.getElementById('commandPaletteOverlay');
             const search = document.getElementById('commandSearch');
@@ -5876,6 +5915,10 @@ Keyboard Shortcuts:
             });
         }
         
+        /* =================================================================
+           INITIALIZATION & EVENT LISTENERS
+           ================================================================= */
+
         function setupEventListeners() {
             document.getElementById('darkModeToggle').addEventListener('change', (e) => {
                 toggleDarkMode(false);

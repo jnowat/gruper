@@ -415,3 +415,61 @@ This adds quality gates without changing the no-build-step philosophy.
 
 *Next scheduled review: 2026-06-16*
 *To track dependency versions manually: check [Chart.js releases](https://github.com/chartjs/Chart.js/releases) and [DOMPurify releases](https://github.com/cure53/DOMPurify/releases)*
+
+---
+
+## Implementation Log: 2026-06-15 (same-day fixes)
+
+**Triggered by:** User request to implement all recommendations from the June 15 review.
+**Branch:** `claude/magical-tesla-s60pv8`
+
+All P0–P2 issues from the June 14–15 reviews were addressed in this session.
+
+### Changes Made
+
+| File | Change | Resolves |
+|---|---|---|
+| `Gruper.html` | Removed duplicate CDN script tags (lines 13–14); upgraded Chart.js 4.4.1→**4.5.1** and DOMPurify 3.0.8→**3.4.10** with correct SRI hashes (npm-verified) | 🔴 CRITICAL: duplicate tags; 🟠 HIGH: stale deps |
+| `Gruper.html` | Fixed shield tooltip from `"Streamlined UX"` → security feature description | 🟢 LOW |
+| `Gruper.html` | Added `localStorage` quota guard to `saveState()`: catches `QuotaExceededError`, frees non-essential keys, retries once, shows warning toast on permanent failure | 🟡 MEDIUM |
+| `Gruper.html` | Added 8 JS section delimiter blocks to the 3,329-line `<script>`: LOGGING & DEBUG, STATE PERSISTENCE, CONVERSATION ENGINE, RENDERING & DISPLAY, ANALYTICS (upgraded from `// ---`), ACCESSIBILITY (upgraded from `// ──`), COMMAND PALETTE (upgraded from `// ---`), INITIALIZATION & EVENT LISTENERS — all matching the existing `/* ===...=== */` format | 🟡 MEDIUM (N-2) |
+| `README.md` | Updated library versions to Chart.js v4.5.1 and DOMPurify v3.4.10 | 🟠 HIGH (docs) |
+| `README.md` | Fixed four incorrect version dates (all had wrong year `2025`): v0.4.0→2026-01-21, v0.3.0→2024-11-21, v0.2.0→2024-11-20, v0.1.7→2024-10-31 | 🟡 MEDIUM |
+| `LICENSE` | Created MIT license file | 🟠 HIGH |
+| `.github/workflows/check.yml` | Created GitHub Actions CI workflow: CDN URL reachability, JS syntax check, APP_VERSION presence check, duplicate-CDN-tag detection | 🟡 MEDIUM |
+
+### New SRI Hashes (npm-verified)
+
+| Library | Version | SHA-384 integrity |
+|---|---|---|
+| Chart.js | 4.5.1 | `sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ` |
+| DOMPurify | 3.4.10 | `sha384-eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx` |
+
+Hashes generated from npm tarballs (`npm pack`) using `openssl dgst -sha384 -binary | openssl base64 -A`. File banners confirmed: `Chart.js v4.5.1` (208,522 bytes) and `DOMPurify 3.4.10` (28,366 bytes).
+
+### Remaining Open Items
+
+| Issue | Status | Notes |
+|---|---|---|
+| 62 inline `onclick` handlers | ⏳ Deferred | Requires broad refactor; no immediate risk |
+| `git` history doesn't reflect dev timeline | ⏳ Deferred | Workflow concern, no code change needed |
+| ROADMAP.md | ⏳ Deferred | Up to project owner |
+| README screenshot placeholders | ⏳ Deferred | Needs actual screenshots |
+
+### Updated Trend Table
+
+| Metric | 2026-06-14 | 2026-06-15 (before) | 2026-06-15 (after) | Target |
+|---|---|---|---|---|
+| Chart.js version | 4.4.1 | 4.4.1 | **4.5.1** ✅ | Latest stable |
+| DOMPurify version | 3.0.8 | 3.0.8 | **3.4.10** ✅ | Latest stable |
+| Duplicate CDN tags | Yes | Yes | **No** ✅ | 0 |
+| Open critical issues | 1 | 1 | **0** ✅ | 0 |
+| Open high issues | 2 | 2 | **0** ✅ | 0 |
+| LICENSE file | No | No | **Yes** ✅ | Present |
+| GitHub Actions | None | None | **1 workflow** ✅ | ≥ 1 |
+| localStorage quota guard | No | No | **Yes** ✅ | Present |
+| JS section delimiters | Partial | Partial | **Complete** ✅ | All sections |
+
+---
+
+*Next scheduled review: 2026-06-16*
