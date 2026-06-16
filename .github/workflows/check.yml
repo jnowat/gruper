@@ -15,8 +15,16 @@ jobs:
 
       - name: Verify CDN URLs are reachable
         run: |
-          curl -f --head "https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"
-          curl -f --head "https://cdn.jsdelivr.net/npm/dompurify@3.4.10/dist/purify.min.js"
+          CHARTJS_VER=$(grep -oP 'chart\.js@\K[\d.]+' Gruper.html | head -1)
+          DOMPURIFY_VER=$(grep -oP 'dompurify@\K[\d.]+' Gruper.html | head -1)
+          echo "Chart.js version in HTML: $CHARTJS_VER"
+          echo "DOMPurify version in HTML: $DOMPURIFY_VER"
+          if [ -z "$CHARTJS_VER" ] || [ -z "$DOMPURIFY_VER" ]; then
+            echo "ERROR: Could not extract CDN library versions from Gruper.html"
+            exit 1
+          fi
+          curl -f --head "https://cdn.jsdelivr.net/npm/chart.js@${CHARTJS_VER}/dist/chart.umd.min.js"
+          curl -f --head "https://cdn.jsdelivr.net/npm/dompurify@${DOMPURIFY_VER}/dist/purify.min.js"
 
       - name: Extract and syntax-check JavaScript
         run: |
@@ -31,14 +39,23 @@ jobs:
 
       - name: Check version consistency
         run: |
-          HTML_VER=$(grep -oP "const APP_VERSION = '\K[^']+" Gruper.html)
+          HTML_VER=$(grep -oP "const APP_VERSION = '\K[^']+" Gruper.html | grep -oP '^\d+\.\d+\.\d+')
           README_VER=$(grep -oP '(?<=version-)\d+\.\d+\.\d+' README.md | head -1)
           echo "Gruper.html APP_VERSION: $HTML_VER"
           echo "README.md badge version: $README_VER"
           if [ -z "$HTML_VER" ]; then
-            echo "ERROR: Could not find APP_VERSION in Gruper.html"
+            echo "ERROR: Could not parse APP_VERSION from Gruper.html"
             exit 1
           fi
+          if [ -z "$README_VER" ]; then
+            echo "ERROR: Could not parse version badge from README.md"
+            exit 1
+          fi
+          if [ "$HTML_VER" != "$README_VER" ]; then
+            echo "ERROR: Version mismatch — Gruper.html has $HTML_VER but README.md badge shows $README_VER"
+            exit 1
+          fi
+          echo "Version consistency OK: $HTML_VER"
 
       - name: Check for duplicate CDN script tags
         run: |
