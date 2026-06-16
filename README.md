@@ -173,8 +173,8 @@ Each agent can be individually configured:
 
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript (ES6+)
 - **Libraries**:
-  - [Chart.js](https://www.chartjs.org/) v4.4.1 - Analytics visualization
-  - [DOMPurify](https://github.com/cure53/DOMPurify) v3.0.8 - XSS protection
+  - [Chart.js](https://www.chartjs.org/) v4.5.1 - Analytics visualization
+  - [DOMPurify](https://github.com/cure53/DOMPurify) v3.4.10 - XSS protection
 - **Backend Integration**: Ollama or LocalAI APIs (REST)
 - **Storage**: LocalStorage for state persistence
 
@@ -240,7 +240,7 @@ Track conversation metrics in real-time:
 - 📏 **Resizable Debug Log**: Drag-to-resize pane with expand/collapse button, persisted height
 - 🧹 **Code Quality**: Removed hardcoded model timeouts, cleaner timeout system with helper function
 
-### v0.4.0 (2025-11-21) - Accessibility + Analytics + New Agents
+### v0.4.0 (2026-01-21) - Accessibility + Analytics + New Agents
 - ♿ **Accessibility Overhaul**: ARIA labels, focus trapping, semantic HTML, improved contrast
 - 📊 **Chart.js Analytics**: Interactive line/bar charts for response times and agent performance
 - 💀 **Skeleton Loading**: Modern animated placeholders replace spinner indicators
@@ -250,7 +250,7 @@ Track conversation metrics in real-time:
 - ⚡ **Chart Lifecycle**: Proper Chart.js creation/destruction prevents memory leaks
 - 📐 **Semantic Structure**: Header, aside, main tags for better screen reader support
 
-### v0.3.0 (2025-11-21) - Stunning Glassmorphism
+### v0.3.0 (2024-11-21) - Stunning Glassmorphism
 - ✨ Floating nebula particles background with smooth animation
 - ✨ Animated SVG AI orb placeholder (replaced static rocket emoji)
 - ✨ Message entrance animations with staggered fade-up + scale
@@ -262,7 +262,7 @@ Track conversation metrics in real-time:
 - ⚡ All animations respect prefers-reduced-motion
 - ⚡ File size: 206KB (41% under target)
 
-### v0.2.0 (2025-11-20) - Production-Ready Refactor
+### v0.2.0 (2024-11-20) - Production-Ready Refactor
 - 🔧 State management refactor with closures
 - 🔧 Exponential backoff (2s, 4s, 8s, 16s) for failed API calls
 - 🔧 Circuit breaker—agents auto-disable after 3 consecutive failures
@@ -271,7 +271,7 @@ Track conversation metrics in real-time:
 - ⚡ Optimized init <80ms even with 500 messages
 - 🎯 Human-in-the-Loop for active user participation
 
-### v0.1.7 (2025-10-31)
+### v0.1.7 (2024-10-31)
 - ✓ Fixed consensus logic bug
 - ✓ Fixed tooltip z-index issues
 - ✓ Fixed control panel layout
