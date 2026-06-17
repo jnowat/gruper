@@ -473,3 +473,204 @@ Hashes generated from npm tarballs (`npm pack`) using `openssl dgst -sha384 -bin
 ---
 
 *Next scheduled review: 2026-06-16*
+
+---
+
+## Review Entry: 2026-06-16
+
+**Reviewer:** Claude (claude-sonnet-4-6 via Claude Code)
+**Branch reviewed:** `main` (commit `5dee66b` — PR #1 merged today)
+**Repository:** `jnowat/gruper`
+**Files reviewed:** `Gruper.html` (6,224 lines / 259 KB), `README.md`, `CHANGELOG.md`, `.github/workflows/check.yml`, `LICENSE`
+**Analysis depth:** Full status sweep; all previous recommendations verified; new findings documented; dependency security research conducted
+
+---
+
+### 1. Project Status
+
+| Attribute | Value |
+|---|---|
+| Current version | `0.4.5 — Streamlined UX` |
+| `APP_VERSION` constant (line 2855) | `'0.4.5 - Streamlined UX'` ✅ |
+| `<title>` tag (line 7) | `Gruper v0.4.5 - Multi-Agent Conversation System` ✅ |
+| `version-badge` div (line 2848) | `Gruper v0.4.5` ✅ |
+| Latest CHANGELOG entry | `v0.4.5 (2026-01-31)` ✅ |
+| **New commits since last review** | **3** — PR #1 merged 2026-06-16 13:06 CDT |
+| **Git commits on main (total)** | **5** (up from 2) |
+| LICENSE file | ✅ Present (MIT) |
+| GitHub Actions CI | ✅ Present (`.github/workflows/check.yml`) |
+| DOMPurify version | ✅ `3.4.10` (latest stable, security release) |
+| Chart.js version | ✅ `4.5.1` (latest stable) |
+| Duplicate CDN script tags | ✅ None |
+| localStorage quota guard | ✅ Present (`saveState()`, lines 3491–3507, with user-facing toast) |
+| JS section delimiters | ✅ Complete (15+ named sections across full `<script>` block) |
+| Shield tooltip | ✅ Shows security features correctly |
+| README screenshot files | ❌ 5 `gruper-*.png` referenced, none in repo |
+
+**Overall health: BEST SINCE INCEPTION.** All P0–P2 issues from the June 14–15 reviews were resolved by PR #1 merged today. No critical or high-severity structural issues remain open. Development activity is evident and tracked in Git for the first time with meaningful commit history.
+
+---
+
+### 2. Verification of June 15 Fixes (All Confirmed ✅)
+
+| Fix | Verification Method | Status |
+|---|---|---|
+| Duplicate CDN tags removed | `grep -c "cdn.jsdelivr.net/npm/chart.js"` → 1; `dompurify` → 1 | ✅ |
+| Chart.js upgraded to 4.5.1 | Line 11 of Gruper.html | ✅ |
+| DOMPurify upgraded to 3.4.10 | Line 12 of Gruper.html | ✅ |
+| SRI integrity hashes present | Both script tags have `integrity="sha384-..."` | ✅ |
+| LICENSE created | `cat LICENSE` → MIT text present | ✅ |
+| localStorage quota guard | Lines 3491–3507: `QuotaExceededError` catch → frees keys → retries → toast on failure | ✅ |
+| JS section delimiters | 15+ `/* === SECTION_NAME === */` blocks in JS (confirmed via grep) | ✅ |
+| Shield tooltip security text | Line 2442: `"XSS protection via DOMPurify • Prompt injection defense • Safe HTML rendering"` | ✅ |
+| README library versions | Lines 176–177: "Chart.js v4.5.1" and "DOMPurify v3.4.10" | ✅ |
+| README date inconsistencies | All pre-v0.4.0 dates now consistent between README and CHANGELOG | ✅ |
+| GitHub Actions workflow | `.github/workflows/check.yml`: CDN check, JS syntax, version presence, duplicate-tag detection | ✅ |
+
+---
+
+### 3. New Findings (June 16)
+
+Issues are ranked by severity: **Critical → High → Medium → Low**.
+
+---
+
+#### 🟠 HIGH — SRI Hashes Cannot Be Verified From This Execution Environment
+
+**Location:** `Gruper.html` lines 11–12
+
+The SRI hashes added in the June 15 fix were generated from `npm pack` tarballs and recorded as:
+```
+Chart.js 4.5.1:   sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ
+DOMPurify 3.4.10: sha384-eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx
+```
+
+During this review, independent hash verification was attempted via `curl | openssl sha384`. Both CDN requests returned the **same hash** — an impossibility for different files — confirming that Anthropic's egress proxy intercepts CDN requests and returns a synthetic response. Real verification is not possible from within this environment.
+
+**Why this matters:** If either hash is wrong, that library silently fails SRI validation in strict browsers (Chrome, Firefox, Safari) and falls back to the weaker `escapeHtml()` path. This is the same class of failure as the June 14 critical bug (different hash per duplicate tag), just with a different root cause.
+
+**How to verify (2 minutes, outside this environment):**
+
+*Option A — Browser DevTools (easiest):*
+1. Open `Gruper.html` in Chrome or Firefox
+2. DevTools → Network tab → reload page
+3. Check both `chart.umd.min.js` and `purify.min.js` requests for `net::ERR_SRI_INTEGRITY` errors
+4. If both return HTTP 200 with no SRI error, hashes are valid
+
+*Option B — Command line:*
+```bash
+curl -sf "https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" \
+  | openssl dgst -sha384 -binary | openssl base64 -A
+
+curl -sf "https://cdn.jsdelivr.net/npm/dompurify@3.4.10/dist/purify.min.js" \
+  | openssl dgst -sha384 -binary | openssl base64 -A
+```
+
+---
+
+#### 🟡 MEDIUM — GitHub Actions Version-Consistency Check Is Non-Fatal
+
+**Location:** `.github/workflows/check.yml` lines 33–41
+
+The "Check version consistency" step extracts `APP_VERSION` from `Gruper.html` and the badge version from `README.md`, but only fails CI if `APP_VERSION` is **empty** — not if the two values are **different**. A future version bump that updates the HTML but not the README (or vice versa) will silently pass CI.
+
+Additionally, the CDN reachability check (lines 17–19) hardcodes library versions. After a future upgrade, both `Gruper.html` and `check.yml` must be updated in sync; a miss leaves the live CDN tag unchecked by CI.
+
+**Recommended patch:** Extract CDN versions dynamically from `Gruper.html` and add an equality-fail comparison.
+
+---
+
+#### 🟢 LOW — DOMPurify Security Context (Informational)
+
+Two DOMPurify CVEs were researched during this review. Neither puts Gruper at risk:
+
+| Advisory | Severity | Affected range | Gruper old (3.0.8) | Gruper new (3.4.10) |
+|---|---|---|---|---|
+| CVE-2026-0540 (GHSA-v2wj-7wpq-c8vv) | CVSS 5.1 | 3.1.3–3.3.1 | ✅ Below range | ✅ Above range |
+| GHSA-h8r8-wccr-v5f2 (mXSS, Re-Contextualization) | High | ≤ 3.3.1 | ✅ Below range | ✅ Above fix boundary (3.3.2) |
+
+DOMPurify 3.4.10 is additionally a security release addressing a bypass in the `<selectedcontent>` HTML element introduced in 3.4.4. Gruper is protected on all known fronts. The upgrade from 3.0.8 → 3.4.10 was the correct and timely action.
+
+---
+
+#### 🟢 LOW — README Screenshot Placeholders (Unchanged Since June 14)
+
+`README.md` lines 44–53 reference 5 `gruper-*.png` screenshot files. None exist in the repository.
+
+---
+
+#### 🟢 LOW — 62 Inline `onclick` Handlers (Deferred, Unchanged)
+
+Carried forward from prior reviews. No change; no immediate risk.
+
+---
+
+### 4. Issue Tracker (Cumulative)
+
+| Issue | June 14 | June 15 | June 16 | Change |
+|---|---|---|---|---|
+| 🔴 Duplicate CDN script tags | Open | Open | **Resolved** ✅ | Fixed in PR #1 |
+| 🟠 Stale Chart.js (4.4.1) | Open | Open | **Resolved** ✅ | Upgraded to 4.5.1 |
+| 🟠 Stale DOMPurify (3.0.8) | Open | Open | **Resolved** ✅ | Upgraded to 3.4.10 |
+| 🟠 No LICENSE file | Open | Open | **Resolved** ✅ | MIT LICENSE added |
+| 🟡 README/CHANGELOG date inconsistencies | Open | Open | **Resolved** ✅ | Dates corrected |
+| 🟡 No CI/CD | Open | Open | **Resolved** ✅ | `check.yml` added |
+| 🟡 No localStorage quota guard | Open | Open | **Resolved** ✅ | Guard + toast added |
+| 🟡 No JS section delimiters | Open | Open | **Resolved** ✅ | 15+ sections added |
+| 🟢 Shield tooltip shows version label | Open | Open | **Resolved** ✅ | Now shows security info |
+| 🟢 Git history flat | Open | Open | **Improved** | 3 new descriptive commits |
+| 🟢 No ROADMAP.md | Open | Open | Open | Deferred |
+| 🟢 README screenshot placeholders | Open | Open | Open | No change |
+| 🟡 62 inline onclick handlers | Open | Open | Open (deferred) | No change |
+| 🟠 SRI hash unverifiable (new) | — | — | **Open** | Manual browser check needed |
+| 🟡 CI version-consistency check non-fatal (new) | — | — | **Open** | Workflow fix needed |
+
+---
+
+### 5. Actionable Recommendations
+
+| # | Recommendation | Priority | Effort |
+|---|---|---|---|
+| REC-1 | Open `Gruper.html` in Chrome/Firefox → DevTools Network → verify no `ERR_SRI_INTEGRITY` on CDN scripts | P0 | 2 min |
+| REC-2 | Fix `check.yml`: make version comparison fatal on mismatch; extract CDN versions dynamically from `Gruper.html` | P1 | 20 min |
+| REC-3 | Add actual screenshots to repo, or remove/replace the "Coming soon" section in README | P2 | 30 min |
+| REC-4 | Write `ROADMAP.md` — clarify whether the single-file model is permanent or transitional | P3 | 30 min |
+
+---
+
+### 6. Trend Tracking (Updated)
+
+| Metric | 2026-06-14 | 2026-06-15 (before) | 2026-06-15 (after) | 2026-06-16 | Target |
+|---|---|---|---|---|---|
+| Gruper.html lines | ~6,181 | 6,182 | 6,182 | **6,224** (+42) | < 7,000 |
+| Gruper.html size | 251 KB | 251 KB | 251 KB | **259 KB** (+8 KB) | < 300 KB |
+| JS lines (script block) | — | 3,329 | ~3,371 | **~3,371** | < 4,000 |
+| CSS lines (style block) | — | 2,259 | ~2,259 | **~2,259** | < 2,500 |
+| Chart.js version | 4.4.1 | 4.4.1 | **4.5.1** ✅ | **4.5.1** ✅ | Latest stable |
+| DOMPurify version | 3.0.8 | 3.0.8 | **3.4.10** ✅ | **3.4.10** ✅ | Latest stable |
+| Duplicate CDN tags | Yes | Yes | **No** ✅ | **No** ✅ | 0 |
+| Open critical issues | 1 | 1 | 0 | **0** ✅ | 0 |
+| Open high issues | 2 | 2 | 0 | **1** (SRI verify) | 0 |
+| Open medium issues | 4 | 5 | 1 | **2** (+1 CI fix) | 0 |
+| Open low issues | 3 | 3 | 2 | **3** | 0 |
+| Git commits on main | 2 | 2 | 2 | **5** ✅ | growing |
+| GitHub Actions | None | None | **1 workflow** ✅ | **1 workflow** ✅ | ≥ 1 |
+| LICENSE | No | No | **Yes** ✅ | **Yes** ✅ | Present |
+| localStorage quota guard | No | No | **Yes** ✅ | **Yes** ✅ | Present |
+| JS section delimiters | Partial | Partial | **Complete** ✅ | **Complete** ✅ | All sections |
+
+---
+
+### 7. Next Steps
+
+| Priority | Action | Est. effort |
+|---|---|---|
+| P0 | Browser-verify SRI hashes: open Gruper.html, check DevTools Network for SRI errors (REC-1) | 2 min |
+| P1 | Fix `check.yml` version consistency check to be fatal on mismatch + dynamic CDN URL extraction (REC-2) | 20 min |
+| P2 | Add screenshots to repo or remove placeholder section from README (REC-3) | 30 min |
+| P3 | Write `ROADMAP.md` (REC-4) | 30 min |
+
+---
+
+*Next scheduled review: 2026-06-17*
+*Key watches: DOMPurify security advisories (actively patched — check releases weekly); Chart.js minor releases; file size growth trend; SRI hash validity after any library upgrade*
