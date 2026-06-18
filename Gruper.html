@@ -9,7 +9,7 @@
     <!-- See CHANGELOG.md for full version history -->
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.10/dist/purify.min.js" integrity="sha384-eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.4.11/dist/purify.min.js" integrity="sha384-o44XUELLEnv/iSlA1NWxBweqbD4TSR0qgq2VzVsxtkHS989JJjGKSE9vkfo5MN4K" crossorigin="anonymous"></script>
 
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2277,6 +2277,7 @@
     </style>
 </head>
 <body>
+    <noscript><style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;font-size:1.2rem;background:#0f172a;color:#f1f5f9;}</style>Gruper requires JavaScript. Please enable it in your browser settings.</noscript>
     <div class="toast-container" id="toastContainer" role="alert" aria-live="polite"></div>
 
     <div class="command-palette-overlay" id="commandPaletteOverlay">
@@ -5827,7 +5828,7 @@ Keyboard Shortcuts:
         }
 
         /* =================================================================
-           INITIALIZATION - v0.2.0 Optimized for <80ms load time
+           APP INIT — init() function (v0.2.0: <80ms load time)
            ================================================================= */
 
         /* v0.2.0: Performance-optimized initialization with lazy loading */

@@ -674,3 +674,278 @@ Carried forward from prior reviews. No change; no immediate risk.
 
 *Next scheduled review: 2026-06-17*
 *Key watches: DOMPurify security advisories (actively patched — check releases weekly); Chart.js minor releases; file size growth trend; SRI hash validity after any library upgrade*
+
+---
+
+## Review Entry: 2026-06-17
+
+**Reviewer:** Claude (claude-sonnet-4-6 via Claude Code)
+**Branch reviewed:** `main` (commit `d4fa271` — PR #2 merged 2026-06-17)
+**Repository:** `jnowat/gruper`
+**Files reviewed:** `Gruper.html` (6,224 lines / 259 KB pre-patch), `README.md`, `CHANGELOG.md`, `.github/workflows/check.yml`, `LICENSE`
+**Analysis depth:** Full status sweep; all prior recommendations verified; two new findings identified and fixed
+
+---
+
+### 1. Project Status
+
+| Attribute | Value |
+|---|---|
+| Current version | `0.4.5 — Streamlined UX` |
+| `APP_VERSION` constant (line 2855) | `'0.4.5 - Streamlined UX'` ✅ |
+| `<title>` tag (line 7) | `Gruper v0.4.5 - Multi-Agent Conversation System` ✅ |
+| `version-badge` div (line 2848) | `Gruper v0.4.5` ✅ |
+| Sidebar version text (line 2656) | `v0.4.5 - Streamlined UX` ✅ |
+| Header badge (line 2438) | `v0.4.5` ✅ |
+| README badge (line 7) | `version-0.4.5` ✅ |
+| Latest CHANGELOG entry | `v0.4.5 (2026-01-31)` ✅ |
+| New commits since June 16 review | **0** — codebase unchanged since PR #2 merge |
+| Git commits on main (total) | **7** (2 original + 5 from Claude-led PRs) |
+| LICENSE file | ✅ Present (MIT) |
+| GitHub Actions CI | ✅ Present and fully hardened after June 16 fix |
+| Chart.js version | ✅ `4.5.1` (single CDN tag, SRI present) |
+| DOMPurify version | ✅ `3.4.10` (single CDN tag, SRI present) |
+| Duplicate CDN script tags | ✅ None |
+| localStorage quota guard | ✅ Present in `saveState()` (line 3494) |
+| JS section delimiters | ✅ 15+ named sections in `<script>` block |
+| Shield tooltip | ✅ Shows security feature description |
+| `<noscript>` fallback | ❌ Missing — **fixed this session** |
+| Duplicate INITIALIZATION section headers | ⚠️ Present — **fixed this session** |
+| README screenshot files | ❌ 5 `gruper-*.png` referenced, none in repo |
+
+**Overall health: Excellent — unchanged from June 16 "best since inception" rating.** All P0–P2 issues remain resolved. No regressions. Two low-severity findings identified and patched this session.
+
+---
+
+### 2. Verification of June 16 Fixes (All Confirmed ✅)
+
+| Fix | Verification | Status |
+|---|---|---|
+| Dynamic CDN version extraction in CI | `check.yml` lines 18–19: `grep -oP 'chart\.js@\K[\d.]+'` / `dompurify@\K` | ✅ |
+| Fatal version-mismatch comparison | `check.yml` lines 54–57: `if [ "$HTML_VER" != "$README_VER" ]` → `exit 1` | ✅ |
+| CI still catches duplicate CDN tags | `check.yml` lines 62–74: count-based detection | ✅ |
+| Chart.js 4.5.1 — single tag | `grep -c "cdn.jsdelivr.net/npm/chart.js"` → 1 | ✅ |
+| DOMPurify 3.4.10 — single tag | `grep -c "cdn.jsdelivr.net/npm/dompurify"` → 1 | ✅ |
+| localStorage quota guard | `QuotaExceededError` catch at line 3494 | ✅ |
+
+---
+
+### 3. File Metrics (Stable)
+
+| Section | Lines | % of total |
+|---|---|---|
+| `<head>` + CDN tags (lines 1–18) | 18 | <1% |
+| CSS `<style>` block (lines 19–2277) | **2,259** | 37% |
+| HTML `<body>` markup (lines 2279–2848) | **570** | 9% |
+| JS `<script>` block (lines 2849–6222) | **3,374** | 54% |
+| Closing tags | 3 | <1% |
+| **Total (pre-patch)** | **6,224** | — |
+
+JS growth from June 15 baseline: +45 lines (+1.4%) — attributable to section delimiters and quota guard added June 15.
+
+---
+
+### 4. New Findings (June 17)
+
+---
+
+#### 🟢 LOW — No `<noscript>` Fallback
+
+**Location:** `Gruper.html` — missing from `<body>` opening
+
+The entire application is JavaScript-driven with zero server-rendered content. Opening `Gruper.html` in a JS-disabled browser (or with a content-blocker that blocks inline scripts) renders a completely blank page with no user guidance.
+
+**Fix applied:** Added a one-line `<noscript>` tag after `<body>` opens (now line 2280) with minimal inline styling matching the dark theme:
+
+```html
+<noscript><style>body{display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:sans-serif;font-size:1.2rem;background:#0f172a;color:#f1f5f9;}</style>Gruper requires JavaScript. Please enable it in your browser settings.</noscript>
+```
+
+---
+
+#### 🟢 LOW — Duplicate `INITIALIZATION` Section Header in JS Block
+
+**Location:** `Gruper.html` lines 5830 and 5919 (pre-patch)
+
+Both section delimiter banners used the word "INITIALIZATION", causing ambiguity when scanning for the entry point:
+
+```
+Line 5830: INITIALIZATION - v0.2.0 Optimized for <80ms load time  ← covers init()
+Line 5919: INITIALIZATION & EVENT LISTENERS                         ← covers setupEventListeners()
+```
+
+A reader searching for "INITIALIZATION" hits two results pointing to different functions.
+
+**Fix applied:** Renamed the first banner from `INITIALIZATION - v0.2.0 Optimized for <80ms load time` to `APP INIT — init() function (v0.2.0: <80ms load time)`. The second banner `INITIALIZATION & EVENT LISTENERS` is unchanged — it accurately describes `setupEventListeners()` and the `DOMContentLoaded` handler.
+
+---
+
+#### 🟡 MEDIUM (ongoing) — Dependency Freshness Unverifiable From This Environment
+
+Chart.js and DOMPurify were upgraded on 2026-06-15. As of this review (~5 weeks later) both libraries may have new patch or minor releases. Neither outbound CDN requests nor npm registry queries can be made from this execution environment (Anthropic's egress proxy was confirmed to intercept CDN requests in the June 16 review).
+
+**Action required (owner, 5 minutes):**
+```bash
+# Check current latest versions:
+# Chart.js: https://github.com/chartjs/Chart.js/releases
+# DOMPurify: https://github.com/cure53/DOMPurify/releases
+#
+# If new versions exist, update Gruper.html lines 11-12 and run:
+curl -sf "https://cdn.jsdelivr.net/npm/chart.js@NEW_VER/dist/chart.umd.min.js" \
+  | openssl dgst -sha384 -binary | openssl base64 -A
+
+curl -sf "https://cdn.jsdelivr.net/npm/dompurify@NEW_VER/dist/purify.min.js" \
+  | openssl dgst -sha384 -binary | openssl base64 -A
+```
+
+DOMPurify is security-critical and should be treated as a weekly check.
+
+---
+
+### 5. Changes Made This Session
+
+| File | Change | Severity Resolved |
+|---|---|---|
+| `Gruper.html` | Added `<noscript>` tag at line 2280 with centered dark-theme error message | 🟢 LOW |
+| `Gruper.html` | Renamed first INITIALIZATION section header to `APP INIT — init() function (v0.2.0: <80ms load time)` | 🟢 LOW |
+
+---
+
+### 6. Issue Tracker (Cumulative)
+
+| Issue | June 14 | June 15 | June 16 | June 17 | Change |
+|---|---|---|---|---|---|
+| 🔴 Duplicate CDN script tags | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟠 Stale Chart.js (4.4.1) | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟠 Stale DOMPurify (3.0.8) | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟠 No LICENSE file | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟡 README/CHANGELOG date inconsistencies | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟡 No CI/CD | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟡 CI version check non-fatal | — | — | Open | Resolved ✅ | Fixed in PR #2 |
+| 🟡 No localStorage quota guard | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟡 No JS section delimiters | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟢 Shield tooltip shows version label | Open | Open | Resolved ✅ | Resolved ✅ | — |
+| 🟢 No `<noscript>` fallback | — | — | — | **Resolved ✅** | Fixed this session |
+| 🟢 Duplicate INIT section headers | — | — | — | **Resolved ✅** | Fixed this session |
+| 🟠 SRI hash unverifiable (env limit) | — | — | Open | Open | Needs browser check |
+| 🟡 Dependency freshness unverifiable | — | — | — | Open | Needs manual check |
+| 🟡 62 inline onclick handlers | Open | Open | Open | Open (deferred) | No change |
+| 🟢 Git history flat | Open | Open | Improved | Improved ✅ | 7 commits now |
+| 🟢 No ROADMAP.md | Open | Open | Open | Open | Deferred |
+| 🟢 README screenshot placeholders | Open | Open | Open | Open | Deferred |
+
+---
+
+### 7. Actionable Recommendations
+
+| # | Recommendation | Priority | Effort |
+|---|---|---|---|
+| REC-1 | Open `Gruper.html` in Chrome/Firefox → DevTools Network → confirm no `ERR_SRI_INTEGRITY` on CDN scripts | P0 | 2 min |
+| REC-2 | Check Chart.js and DOMPurify release pages for versions newer than 4.5.1 / 3.4.10; if found, upgrade and regenerate SRI hashes | P1 | 15 min |
+| REC-3 | Add screenshots to repo or remove the "Coming soon" placeholder section from README | P2 | 30 min |
+| REC-4 | Write `ROADMAP.md` to clarify whether the single-file model is permanent or transitional | P3 | 30 min |
+
+---
+
+### 8. Trend Tracking (Updated)
+
+| Metric | 2026-06-14 | 2026-06-15 (after) | 2026-06-16 | 2026-06-17 | Target |
+|---|---|---|---|---|---|
+| Gruper.html lines | ~6,181 | 6,224 | 6,224 | **6,225** (+1) | < 7,000 |
+| Gruper.html size | 251 KB | 259 KB | 259 KB | **259 KB** | < 300 KB |
+| JS lines (script block) | — | ~3,371 | ~3,371 | **3,374** | < 4,000 |
+| CSS lines (style block) | — | ~2,259 | ~2,259 | **2,259** | < 2,500 |
+| Named JS functions | — | ~150 | ~150 | **~149** | track |
+| Chart.js version | 4.4.1 | **4.5.1** ✅ | 4.5.1 ✅ | **4.5.1** ✅ | Latest stable |
+| DOMPurify version | 3.0.8 | **3.4.10** ✅ | 3.4.10 ✅ | **3.4.10** ✅ | Latest stable |
+| Duplicate CDN tags | Yes | **No** ✅ | No ✅ | **No** ✅ | 0 |
+| `<noscript>` fallback | No | No | No | **Yes** ✅ | Present |
+| Open critical issues | 1 | 0 | 0 | **0** ✅ | 0 |
+| Open high issues | 2 | 0 | 1 (SRI verify) | **1** | 0 |
+| Open medium issues | 4 | 1 | 2 | **2** | 0 |
+| Open low issues | 3 | 2 | 3 | **1** | 0 |
+| Git commits on main | 2 | 2 | 5 | **7** ✅ | growing |
+| GitHub Actions | None | **1 workflow** ✅ | 1 workflow ✅ | **1 workflow** ✅ | ≥ 1 |
+| LICENSE | No | **Yes** ✅ | Yes ✅ | **Yes** ✅ | Present |
+| localStorage quota guard | No | **Yes** ✅ | Yes ✅ | **Yes** ✅ | Present |
+| JS section delimiters | Partial | **Complete** ✅ | Complete ✅ | **Complete** ✅ | All sections |
+
+---
+
+### 9. Next Steps
+
+| Priority | Action | Est. effort |
+|---|---|---|
+| P0 | Browser-verify SRI hashes (DevTools Network tab → no ERR_SRI_INTEGRITY) | 2 min |
+| P1 | Check Chart.js / DOMPurify for new releases; upgrade if needed | 15 min |
+| P2 | Add screenshots or remove placeholder section from README | 30 min |
+| P3 | Write `ROADMAP.md` | 30 min |
+
+---
+
+*Next scheduled review: 2026-06-18*
+*Key watches: DOMPurify security advisories (actively patched — check weekly); Chart.js minor releases; Gruper.html size growth; CI run results on push*
+
+---
+
+## Implementation Log: 2026-06-17 (same-day continuation)
+
+**Triggered by:** Dependency freshness check and SRI hash verification (P0/P1 items from June 17 review).
+
+### SRI Hash Verification (P0 — Resolved ✅)
+
+Both SRI hashes were verified by downloading official npm tarballs (`npm pack`) and computing SHA-384 hashes independently:
+
+| Library | Version | Expected SRI (Gruper.html) | Computed from npm tarball | Match |
+|---|---|---|---|---|
+| Chart.js | 4.5.1 | `sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ` | `jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ` | ✅ |
+| DOMPurify | 3.4.10 | `sha384-eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx` | `eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx` | ✅ |
+
+**Both hashes are correct.** The standing 🟠 HIGH "SRI hash unverifiable" finding from June 16 is now **fully resolved** — not merely asserted, but independently verified.
+
+---
+
+### Dependency Freshness Check (P1 — Action Taken)
+
+| Library | Gruper version | Latest stable | Status |
+|---|---|---|---|
+| Chart.js | 4.5.1 | **4.5.1** (last published Oct 2025, ~7 months ago) | ✅ Current — no action |
+| DOMPurify | 3.4.10 | **3.4.11** (published 2026-06-17, today) | ⬆️ Upgraded |
+
+**DOMPurify 3.4.11 release notes (maintenance patch, not a security release):**
+- Fixed a config leak with `setConfig` hooks (`leaky config for hooks via setConfig`)
+- Dev dependency updates to clear `npm audit` vulnerabilities
+- Toolchain refresh and documentation updates
+
+This is a low-urgency maintenance upgrade, but staying current on DOMPurify is best practice given its role as Gruper's sole XSS defense.
+
+### Changes Made
+
+| File | Change |
+|---|---|
+| `Gruper.html` | DOMPurify CDN tag: `3.4.10` → `3.4.11`, SRI hash updated to npm-verified `sha384-o44XUELLEnv/iSlA1NWxBweqbD4TSR0qgq2VzVsxtkHS989JJjGKSE9vkfo5MN4K` |
+| `README.md` | DOMPurify version reference updated to `v3.4.11` |
+
+### New SRI Hash (npm-verified)
+
+| Library | Version | File size | SHA-384 integrity |
+|---|---|---|---|
+| DOMPurify | 3.4.11 | 28,438 bytes | `sha384-o44XUELLEnv/iSlA1NWxBweqbD4TSR0qgq2VzVsxtkHS989JJjGKSE9vkfo5MN4K` |
+
+Hash computed via: `npm pack dompurify@3.4.11 && tar -xzf ... && openssl dgst -sha384 -binary purify.min.js | openssl base64 -A`
+
+### Updated Issue Tracker
+
+| Issue | Status after this log |
+|---|---|
+| 🟠 SRI hash unverifiable | **Resolved ✅** — verified via npm tarball |
+| DOMPurify at 3.4.10 (stale by 1 patch) | **Resolved ✅** — upgraded to 3.4.11 |
+
+### Updated Trend Table
+
+| Metric | 2026-06-17 (morning) | 2026-06-17 (evening) |
+|---|---|---|
+| DOMPurify version | 3.4.10 | **3.4.11** ✅ |
+| Chart.js version | 4.5.1 | **4.5.1** ✅ (confirmed current) |
+| Open high issues | 1 (SRI unverified) | **0** ✅ |
+| Open medium issues | 2 | **2** (dependency freshness check now recurring, not a discrete issue) |
