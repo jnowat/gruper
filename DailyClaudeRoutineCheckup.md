@@ -885,3 +885,67 @@ DOMPurify is security-critical and should be treated as a weekly check.
 
 *Next scheduled review: 2026-06-18*
 *Key watches: DOMPurify security advisories (actively patched — check weekly); Chart.js minor releases; Gruper.html size growth; CI run results on push*
+
+---
+
+## Implementation Log: 2026-06-17 (same-day continuation)
+
+**Triggered by:** Dependency freshness check and SRI hash verification (P0/P1 items from June 17 review).
+
+### SRI Hash Verification (P0 — Resolved ✅)
+
+Both SRI hashes were verified by downloading official npm tarballs (`npm pack`) and computing SHA-384 hashes independently:
+
+| Library | Version | Expected SRI (Gruper.html) | Computed from npm tarball | Match |
+|---|---|---|---|---|
+| Chart.js | 4.5.1 | `sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ` | `jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ` | ✅ |
+| DOMPurify | 3.4.10 | `sha384-eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx` | `eguRoJERj8ghOpzO//Rl7+ScQsQIR1cH+ajll7+fG+IpbNPlkZsQn9h8ccr+wPXx` | ✅ |
+
+**Both hashes are correct.** The standing 🟠 HIGH "SRI hash unverifiable" finding from June 16 is now **fully resolved** — not merely asserted, but independently verified.
+
+---
+
+### Dependency Freshness Check (P1 — Action Taken)
+
+| Library | Gruper version | Latest stable | Status |
+|---|---|---|---|
+| Chart.js | 4.5.1 | **4.5.1** (last published Oct 2025, ~7 months ago) | ✅ Current — no action |
+| DOMPurify | 3.4.10 | **3.4.11** (published 2026-06-17, today) | ⬆️ Upgraded |
+
+**DOMPurify 3.4.11 release notes (maintenance patch, not a security release):**
+- Fixed a config leak with `setConfig` hooks (`leaky config for hooks via setConfig`)
+- Dev dependency updates to clear `npm audit` vulnerabilities
+- Toolchain refresh and documentation updates
+
+This is a low-urgency maintenance upgrade, but staying current on DOMPurify is best practice given its role as Gruper's sole XSS defense.
+
+### Changes Made
+
+| File | Change |
+|---|---|
+| `Gruper.html` | DOMPurify CDN tag: `3.4.10` → `3.4.11`, SRI hash updated to npm-verified `sha384-o44XUELLEnv/iSlA1NWxBweqbD4TSR0qgq2VzVsxtkHS989JJjGKSE9vkfo5MN4K` |
+| `README.md` | DOMPurify version reference updated to `v3.4.11` |
+
+### New SRI Hash (npm-verified)
+
+| Library | Version | File size | SHA-384 integrity |
+|---|---|---|---|
+| DOMPurify | 3.4.11 | 28,438 bytes | `sha384-o44XUELLEnv/iSlA1NWxBweqbD4TSR0qgq2VzVsxtkHS989JJjGKSE9vkfo5MN4K` |
+
+Hash computed via: `npm pack dompurify@3.4.11 && tar -xzf ... && openssl dgst -sha384 -binary purify.min.js | openssl base64 -A`
+
+### Updated Issue Tracker
+
+| Issue | Status after this log |
+|---|---|
+| 🟠 SRI hash unverifiable | **Resolved ✅** — verified via npm tarball |
+| DOMPurify at 3.4.10 (stale by 1 patch) | **Resolved ✅** — upgraded to 3.4.11 |
+
+### Updated Trend Table
+
+| Metric | 2026-06-17 (morning) | 2026-06-17 (evening) |
+|---|---|---|
+| DOMPurify version | 3.4.10 | **3.4.11** ✅ |
+| Chart.js version | 4.5.1 | **4.5.1** ✅ (confirmed current) |
+| Open high issues | 1 (SRI unverified) | **0** ✅ |
+| Open medium issues | 2 | **2** (dependency freshness check now recurring, not a discrete issue) |

@@ -174,7 +174,7 @@ Each agent can be individually configured:
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript (ES6+)
 - **Libraries**:
   - [Chart.js](https://www.chartjs.org/) v4.5.1 - Analytics visualization
-  - [DOMPurify](https://github.com/cure53/DOMPurify) v3.4.10 - XSS protection
+  - [DOMPurify](https://github.com/cure53/DOMPurify) v3.4.11 - XSS protection
 - **Backend Integration**: Ollama or LocalAI APIs (REST)
 - **Storage**: LocalStorage for state persistence
 
