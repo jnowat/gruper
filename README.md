@@ -7,6 +7,8 @@ Gruper is a sophisticated web-based application that enables collaborative conve
 [![Version](https://img.shields.io/badge/version-0.4.5-blue.svg)](https://github.com/jnowat/gruper)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+**Docs:** [User Manual](UserManual.md) · [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md)
+
 ## Features
 
 ### Multi-Agent Conversations
@@ -43,14 +45,7 @@ Gruper is a sophisticated web-based application that enables collaborative conve
 
 ## Screenshots
 
-*Coming soon: Visual examples of Gruper's stunning glassmorphism interface*
-
-### Suggested Screenshots
-- **`gruper-main-interface.png`**: Multi-agent conversation in progress with glassmorphism design, nebula particle background, and skeleton loading indicators
-- **`gruper-agent-config.png`**: Sidebar configuration panel showing 12 agent templates, timeout settings, and advanced parameters
-- **`gruper-analytics-dashboard.png`**: Interactive Chart.js dashboard with response time trends, per-agent performance bars, and success rate pie chart
-- **`gruper-round-summary.png`**: Minimal round summary badge showing completion status
-- **`gruper-debug-console.png`**: Searchable, resizable debug log pane with live filtering and auto-scroll toggle
+*Screenshots coming soon. Open `Gruper.html` in a browser to experience the glassmorphism interface, multi-agent conversations, and analytics dashboard firsthand.*
 
 ## Quick Start
 

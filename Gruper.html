@@ -2855,11 +2855,7 @@ Example: What are the ethical considerations of AI in healthcare?"
         // v0.4.5: Application version updated
         const APP_VERSION = '0.4.5 - Streamlined UX';
         const STORAGE_KEY = 'multiAgentApp';
-        
-        /* =================================================================
-           LOGGING SYSTEM - (Merged from v24-3 and v0-1-2)
-           ================================================================= */
-        
+
         const LogLevel = {
             DEBUG: 0,
             INFO: 1,
@@ -3843,7 +3839,7 @@ Example: What are the ethical considerations of AI in healthcare?"
         }
 
         /* =================================================================
-           UI RENDERING
+           SIDEBAR & AGENT CONFIG
            ================================================================= */
         
         /**
@@ -4088,7 +4084,7 @@ Example: What are the ethical considerations of AI in healthcare?"
         }
         
         /* =================================================================
-           CONVERSATION ENGINE
+           TASK INPUT & VALIDATION
            ================================================================= */
 
         /**
@@ -4144,7 +4140,7 @@ Example: What are the ethical considerations of AI in healthcare?"
         }
         
         /* =================================================================
-           CONVERSATION MANAGEMENT - (from v24-3, but with v0-1-2 restores)
+           CONVERSATION MANAGEMENT
            ================================================================= */
         
         function initConversation(id) {
@@ -6135,7 +6131,7 @@ Keyboard Shortcuts:
         }
 
         /* =================================================================
-           v0.3.0: PROMPT PANEL MINIMIZE TOGGLE
+           PROMPT PANEL
            ================================================================= */
         function togglePromptPanel() {
             const panel = document.getElementById('promptPanel');
@@ -6153,7 +6149,7 @@ Keyboard Shortcuts:
         }
 
         /* =================================================================
-           v0.3.0: CUSTOM GLASS CONFIRMATION MODAL
+           CONFIRMATION MODAL
            ================================================================= */
         let confirmModalResolver = null;
 
