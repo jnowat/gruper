@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+---
+
+## Maintenance (2026-06-15 → 2026-06-19) — Infrastructure & Documentation
+
+No version bump — these are infrastructure, security, and documentation changes only. `APP_VERSION` remains `0.4.5`.
+
+**Security & Dependencies:**
+- UPGRADED: Chart.js 4.4.1 → 4.5.1 (latest stable)
+- UPGRADED: DOMPurify 3.0.8 → 3.4.10 → 3.4.11 (latest stable; 3.4.11 fixes a `setConfig` hook leak)
+- FIXED: Removed duplicate CDN `<script>` tags (was loading Chart.js and DOMPurify twice each, with mismatched SRI hashes — silent load failure in strict browsers)
+- VERIFIED: All SRI integrity hashes confirmed correct via npm tarball hash computation
+
+**Code Quality:**
+- ADDED: `localStorage` `QuotaExceededError` guard in `saveState()` with retry logic and user-facing warning toast
+- ADDED: 15+ JS section delimiter banners across the 3,329-line `<script>` block for navigability
+- FIXED: Shield icon tooltip now describes security features instead of showing the version tagline
+- FIXED: `<noscript>` fallback added for JS-disabled browsers
+- FIXED: Disambiguated duplicate `INITIALIZATION` section headers in the JS block
+- FIXED: Cleaned up legacy/version-prefixed JS section headers (renamed 4 sections, removed 1 redundant header)
+
+**Infrastructure:**
+- ADDED: `LICENSE` (MIT)
+- ADDED: `.github/workflows/check.yml` — CI checks CDN reachability, JS syntax, version consistency (fatal on mismatch), and duplicate CDN tag detection
+- FIXED: CI version-consistency check made fatal on actual mismatch; CDN versions now extracted dynamically from `Gruper.html`
+- FIXED: Four incorrect version dates in `README.md` (wrong year 2025 → correct 2026)
+
+**Documentation:**
+- ADDED: `ROADMAP.md` — roadmap with architecture philosophy, near/medium/long-term plans, and known tech debt
+- ADDED: `UserManual.md` — full user manual covering setup, agents, controls, analytics, and troubleshooting
+- UPDATED: `README.md` — library versions, doc cross-links, screenshot placeholder cleanup
+- UPDATED: `CHANGELOG.md` with this maintenance record
+
+---
+
 ## v0.4.5 (2026-01-31) - Streamlined UX
 
 **BREAKING CHANGES:**
@@ -19,7 +53,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## v0.4.4 (2026-01-31) - UI Polish
+## v0.4.4 (2026-01-31) - Reliability & UX Polish
 
 **🏷️ BUG FIXES:**
 - Updated all UI version displays to v0.4.4
