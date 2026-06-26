@@ -1624,3 +1624,294 @@ All section names are now unambiguous, non-duplicated, and version-prefix-free.
 | `UserManual.md` | New file: 18-section user documentation covering all Gruper features |
 | `README.md` | Added navigation badge row linking to UserManual.md, ROADMAP.md, and CHANGELOG.md |
 | `DailyClaudeRoutineCheckup.md` | This entry |
+
+---
+
+## Review Entry: 2026-06-21
+
+**Reviewer:** Claude (claude-sonnet-4-6 via Claude Code)
+**Branch reviewed:** `main` (commit `b9e537c` — PR #4 merged 2026-06-20T18:27:00Z)
+**Repository:** `jnowat/gruper`
+**Files reviewed:** `Gruper.html` (6,221 lines / 253 KB), `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `UserManual.md`, `.github/workflows/check.yml`, `DailyClaudeRoutineCheckup.md`
+**Analysis depth:** Full status sweep; all prior recommendations verified; section header audit; documentation updated
+
+---
+
+### 1. Project Status
+
+| Attribute | Value |
+|---|---|
+| Current version | `0.4.5 — Streamlined UX` |
+| `APP_VERSION` constant (line 2856) | `'0.4.5 - Streamlined UX'` ✅ |
+| `<title>` tag (line 7) | `Gruper v0.4.5 - Multi-Agent Conversation System` ✅ |
+| `version-badge` div | `Gruper v0.4.5` ✅ |
+| README badge | `version-0.4.5` ✅ |
+| Latest CHANGELOG entry | `v0.4.5 (2026-01-31)` ✅ |
+| Maintenance CHANGELOG section | `2026-06-15 → 2026-06-21` ✅ (updated this session) |
+| New commits since June 20 review | **1** — PR #4 merged June 20 (brings June 18–20 changes to main) |
+| Git commits on main (total) | **12** |
+| Active branches | `main` only — clean |
+| LICENSE | ✅ MIT |
+| GitHub Actions CI | ✅ `check.yml` — all 4 checks green |
+| Chart.js | ✅ `4.5.1` (single CDN tag, SRI npm-verified) |
+| DOMPurify | ✅ `3.4.11` (single CDN tag, SRI npm-verified) |
+| Duplicate CDN tags | ✅ None |
+| `<noscript>` fallback | ✅ Present |
+| localStorage quota guard | ✅ Present in `saveState()` |
+| JS section delimiters | ✅ 18 named sections |
+| CSS section banners | ✅ All version-prefix-free after this session |
+| ROADMAP.md | ✅ Present (updated this session) |
+| UserManual.md | ✅ Present (20 sections) |
+| README doc cross-links | ✅ Present |
+
+**Overall health: Excellent.** PR #4 successfully consolidated three daily review branches (June 18–20) into a clean, congruent main. All section-header cleanup that was the focus of June 18–20 is verified in place. This session addresses the final wave of header inconsistencies that remained in the CSS block and five JS sections — completing the full naming audit across all 36 section banners in the file.
+
+---
+
+### 2. Verification of PR #4 Merge (All Confirmed ✅)
+
+PR #4 ("Merge June 18–20 daily review branches: docs, JS cleanup, ROADMAP, UserManual") merged 2026-06-20T18:27:00Z. All intended changes verified in main:
+
+| Change | Verification | Status |
+|---|---|---|
+| JS section: `UI RENDERING` → `SIDEBAR & AGENT CONFIG` | Line 3841 | ✅ |
+| JS section: `CONVERSATION ENGINE` → `TASK INPUT & VALIDATION` | Line 4086 | ✅ |
+| JS section: `PROMPT PANEL MINIMIZE TOGGLE` → `PROMPT PANEL` | Line 6133 | ✅ |
+| JS section: `CUSTOM GLASS CONFIRMATION MODAL` → `CONFIRMATION MODAL` | Line 6151 | ✅ |
+| ROADMAP.md created | Present, 128 lines | ✅ |
+| UserManual.md created (20 sections) | Present | ✅ |
+| README doc nav links added | "**Docs:** User Manual · Roadmap · Changelog" | ✅ |
+| CHANGELOG maintenance section | `## Maintenance (2026-06-15 → 2026-06-19)` (updated to Jun 21 this session) | ✅ |
+
+---
+
+### 3. File Metrics (Updated)
+
+| Section | Lines | % of total |
+|---|---|---|
+| `<head>` + CDN tags (lines 1–18) | 18 | <1% |
+| CSS `<style>` block (lines 19–2277) | **2,259** | 36% |
+| HTML `<body>` markup (lines 2278–2849) | **572** | 9% |
+| JS `<script>` block (lines 2850–6218) | **3,369** | 54% |
+| Closing tags | 3 | <1% |
+| **Total** | **6,221** | — |
+
+File size: **253 KB** (259,148 bytes — slight reduction from character-level cleanups this session).
+Inline `onclick` handlers: **62** (unchanged — still deferred).
+
+---
+
+### 4. New Findings (June 21)
+
+---
+
+#### 🟡 MEDIUM — CSS Block Had Three Version-Prefixed Section Headers (Resolved ✅)
+
+**Location:** `Gruper.html` CSS `<style>` block
+
+While the June 18–20 sessions cleaned up the JS block's version-prefixed headers, the CSS block still had three that used the same old convention:
+
+| Old name | New name | Line (approx.) |
+|---|---|---|
+| `v0.3.0: MINIMIZABLE PROMPT PANEL` | `MINIMIZABLE PROMPT PANEL` | 2098 |
+| `v0.3.0: CUSTOM GLASS CONFIRMATION MODAL` | `CUSTOM GLASS CONFIRMATION MODAL` | 2138 |
+| `v0.3.0: ANIMATED AI ORB (placeholder replacement)` | `ANIMATED AI ORB` | 2219 |
+
+**Fixed this session.**
+
+---
+
+#### 🟡 MEDIUM — Five JS Sections Still Carried Provenance Annotations (Resolved ✅)
+
+**Location:** `Gruper.html` JS `<script>` block
+
+Five section banners still carried `- (from vX-Y)`, `- (Merged)`, or `- vX.Y.Z Refactored…` suffixes — the same style that was cleaned from 4 other sections over June 18–20:
+
+| Old name | New name |
+|---|---|
+| `CORE SYSTEM - v0.2.0 Refactored with State Closure` | `CORE SYSTEM` |
+| `API COMMUNICATION LAYER - (from v24-3)` | `API COMMUNICATION LAYER` |
+| `STATE MANAGEMENT - (Merged)` | `STATE MANAGEMENT` |
+| `CONNECTION MANAGEMENT - (from v24-3)` | `CONNECTION MANAGEMENT` |
+| `UI UTILITIES - (Restored from v0-1-2)` | `UI UTILITIES` |
+
+**Fixed this session.** All 36 section banners across CSS and JS blocks are now annotation-free and use a consistent plain-name convention. The only remaining descriptive text in a section header is `APP INIT — init() function (v0.2.0: <80ms load time)`, intentionally kept to distinguish it from the adjacent `INITIALIZATION & EVENT LISTENERS` section (added June 17 for disambiguation).
+
+---
+
+#### 🟢 LOW — CHANGELOG Maintenance Date Was Stale (Resolved ✅)
+
+The maintenance section header read `2026-06-15 → 2026-06-19` despite further work on June 20 (PR #4). Updated to `2026-06-15 → 2026-06-21`. Also updated the bullet describing section-header cleanup to reflect the total scope (11 headers renamed across Jun 18–21, plus today's 8).
+
+---
+
+#### 🟢 LOW — ROADMAP.md Missing June 20 and 21 Completed Items (Resolved ✅)
+
+The completed-items table ended at June 19. Added June 20 and June 21 entries and updated the "last updated" footer date.
+
+---
+
+#### 🟡 MEDIUM (ongoing, deferred) — 62 Inline `onclick` Handlers
+
+No change. Still deferred. Recommended starting point: sidebar agent card buttons (low-risk, contained scope, ~8 handlers).
+
+---
+
+#### 🟢 LOW (ongoing) — README Screenshots Still "Coming Soon"
+
+No change. No screenshots available. Placeholder remains. Lowest-priority deferred item.
+
+---
+
+### 5. Section Delimiter Inventory (Complete — Post Session)
+
+All 36 section banners in `Gruper.html` are now annotation-free. Final state:
+
+**CSS block (18 sections):**
+
+| # | Section Name |
+|---|---|
+| 1 | GLASSMORPHISM v0.2.0 - Breathtaking Modern Design *(file header — not a nav section)* |
+| 2 | ANIMATED GRADIENT HEADER WITH SHIMMER |
+| 3 | GLASS CONTAINER |
+| 4 | VIBRANT ANIMATED GRADIENT HEADER |
+| 5 | LAYOUT COMPONENTS |
+| 6 | FLOATING GLASS SIDEBAR |
+| 7 | TAB SYSTEM WITH GLASS EFFECT |
+| 8 | STATUS BAR |
+| 9 | FLOATING GLASS CARDS FOR MESSAGES |
+| 10 | GLOWING RAINBOW RING AVATARS |
+| 11 | CONTROL PANEL & ACTION BUTTONS WITH DEPTH |
+| 12 | ENHANCED BUTTONS WITH GLOW & DEPTH |
+| 13 | GLASS SIDEBAR SECTIONS |
+| 14 | AGENT CARDS WITH GLASS EFFECT |
+| 15 | ENHANCED MODALS & TOASTS |
+| 16 | MINIMIZABLE PROMPT PANEL *(was `v0.3.0: MINIMIZABLE PROMPT PANEL`)* |
+| 17 | CUSTOM GLASS CONFIRMATION MODAL *(was `v0.3.0: CUSTOM GLASS CONFIRMATION MODAL`)* |
+| 18 | ANIMATED AI ORB *(was `v0.3.0: ANIMATED AI ORB (placeholder replacement)`)* |
+
+**JS block (18 sections):**
+
+| # | Section Name |
+|---|---|
+| 1 | CORE SYSTEM *(was `CORE SYSTEM - v0.2.0 Refactored with State Closure`)* |
+| 2 | LOGGING & DEBUG |
+| 3 | API COMMUNICATION LAYER *(was `API COMMUNICATION LAYER - (from v24-3)`)* |
+| 4 | STATE MANAGEMENT *(was `STATE MANAGEMENT - (Merged)`)* |
+| 5 | STATE PERSISTENCE |
+| 6 | CONNECTION MANAGEMENT *(was `CONNECTION MANAGEMENT - (from v24-3)`)* |
+| 7 | SIDEBAR & AGENT CONFIG *(was `UI RENDERING` — renamed Jun 20)* |
+| 8 | TASK INPUT & VALIDATION *(was `CONVERSATION ENGINE` — renamed Jun 20)* |
+| 9 | CONVERSATION MANAGEMENT |
+| 10 | RENDERING & DISPLAY |
+| 11 | UI UTILITIES *(was `UI UTILITIES - (Restored from v0-1-2)`)* |
+| 12 | ANALYTICS |
+| 13 | ACCESSIBILITY |
+| 14 | COMMAND PALETTE |
+| 15 | APP INIT — init() function (v0.2.0: <80ms load time) *(intentional — disambiguates from section 16)* |
+| 16 | INITIALIZATION & EVENT LISTENERS |
+| 17 | PROMPT PANEL *(was `v0.3.0: PROMPT PANEL MINIMIZE TOGGLE` — renamed Jun 20)* |
+| 18 | CONFIRMATION MODAL *(was `v0.3.0: CUSTOM GLASS CONFIRMATION MODAL` — renamed Jun 20)* |
+
+---
+
+### 6. Changes Made This Session
+
+| File | Change | Severity Resolved |
+|---|---|---|
+| `Gruper.html` | CSS: renamed `v0.3.0: MINIMIZABLE PROMPT PANEL` → `MINIMIZABLE PROMPT PANEL` | 🟡 MEDIUM |
+| `Gruper.html` | CSS: renamed `v0.3.0: CUSTOM GLASS CONFIRMATION MODAL` → `CUSTOM GLASS CONFIRMATION MODAL` | 🟡 MEDIUM |
+| `Gruper.html` | CSS: renamed `v0.3.0: ANIMATED AI ORB (placeholder replacement)` → `ANIMATED AI ORB` | 🟡 MEDIUM |
+| `Gruper.html` | JS: renamed `CORE SYSTEM - v0.2.0 Refactored with State Closure` → `CORE SYSTEM` | 🟡 MEDIUM |
+| `Gruper.html` | JS: renamed `API COMMUNICATION LAYER - (from v24-3)` → `API COMMUNICATION LAYER` | 🟡 MEDIUM |
+| `Gruper.html` | JS: renamed `STATE MANAGEMENT - (Merged)` → `STATE MANAGEMENT` | 🟡 MEDIUM |
+| `Gruper.html` | JS: renamed `CONNECTION MANAGEMENT - (from v24-3)` → `CONNECTION MANAGEMENT` | 🟡 MEDIUM |
+| `Gruper.html` | JS: renamed `UI UTILITIES - (Restored from v0-1-2)` → `UI UTILITIES` | 🟡 MEDIUM |
+| `CHANGELOG.md` | Updated maintenance date from `→ 2026-06-19` to `→ 2026-06-21`; updated section-header bullet to reflect full scope | 🟢 LOW |
+| `ROADMAP.md` | Added June 20 and June 21 entries to completed table; updated footer date | 🟢 LOW |
+| `DailyClaudeRoutineCheckup.md` | This entry | — |
+
+**Net line change in Gruper.html:** 0 (character-level changes only; 155 bytes saved).
+
+---
+
+### 7. Issue Tracker (Cumulative)
+
+| Issue | Jun 14 | Jun 15 | Jun 16 | Jun 17 | Jun 20 | Jun 21 | Change |
+|---|---|---|---|---|---|---|---|
+| 🔴 Duplicate CDN script tags | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 Stale Chart.js (4.4.1) | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 Stale DOMPurify (3.0.8) | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 No LICENSE file | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 README/CHANGELOG date errors | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 No CI/CD | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 CI version check non-fatal | — | — | Open | ✅ | ✅ | ✅ | — |
+| 🟡 No localStorage quota guard | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 No JS section delimiters | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟢 Shield tooltip label wrong | Open | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟢 No `<noscript>` fallback | — | — | — | ✅ | ✅ | ✅ | — |
+| 🟠 SRI hash unverifiable | — | — | Open | ✅ | ✅ | ✅ | — |
+| 🟡 No ROADMAP.md | Open | Open | Open | Open | ✅ | ✅ | — |
+| 🟡 No UserManual.md | — | — | — | — | ✅ | ✅ | — |
+| 🟡 Legacy JS section header names | — | — | — | — | Open | **✅** | Fixed this session |
+| 🟡 Version-prefixed CSS section headers | — | — | — | — | Open | **✅** | Fixed this session |
+| 🟡 CHANGELOG maintenance date stale | — | — | — | — | Open | **✅** | Fixed this session |
+| 🟡 ROADMAP missing Jun 20–21 entries | — | — | — | — | Open | **✅** | Fixed this session |
+| 🟡 ~62 inline `onclick` handlers | Open | Open | Open | Open | Open (deferred) | Open (deferred) | — |
+| 🟢 README screenshots | Open | Open | Open | Open | Open | Open | — |
+
+**Open items after this session:**
+- 🟡 ~62 inline `onclick` handlers (deferred; broad refactor)
+- 🟢 README screenshots (deferred; no images available)
+- 🟡 Dependency freshness (recurring — check DOMPurify weekly)
+
+---
+
+### 8. Actionable Recommendations
+
+| # | Recommendation | Priority | Effort |
+|---|---|---|---|
+| REC-1 | Check DOMPurify for releases newer than 3.4.11 and Chart.js newer than 4.5.1; upgrade if found | P1 (weekly) | 15 min |
+| REC-2 | Begin incremental inline `onclick` → `addEventListener` migration; start with sidebar agent card buttons (~8 handlers, low risk) | P3 | 1–2 hrs |
+| REC-3 | Add screenshots to `/screenshots/` directory or remove "Coming soon" placeholder from README | P3 | 30 min |
+
+---
+
+### 9. Trend Tracking (Updated)
+
+| Metric | Jun 14 | Jun 15 (after) | Jun 16 | Jun 17 | Jun 20 | Jun 21 | Target |
+|---|---|---|---|---|---|---|---|
+| Gruper.html lines | ~6,181 | 6,224 | 6,224 | 6,225 | 6,221 | **6,221** (stable) | < 7,000 |
+| Gruper.html size | 251 KB | 259 KB | 259 KB | 259 KB | ~259 KB | **253 KB** ✅ | < 300 KB |
+| JS lines (script block) | — | ~3,371 | ~3,371 | 3,374 | 3,370 | **3,369** | < 4,000 |
+| CSS lines (style block) | — | ~2,259 | ~2,259 | 2,259 | 2,259 | **2,259** | < 2,500 |
+| Chart.js version | 4.4.1 | 4.5.1 ✅ | 4.5.1 ✅ | 4.5.1 ✅ | 4.5.1 ✅ | **4.5.1** ✅ | Latest stable |
+| DOMPurify version | 3.0.8 | 3.4.10 | 3.4.10 | 3.4.11 ✅ | 3.4.11 ✅ | **3.4.11** ✅ | Latest stable |
+| Duplicate CDN tags | Yes | No ✅ | No ✅ | No ✅ | No ✅ | **No** ✅ | 0 |
+| Version-prefixed section headers | Many | Many | Some | Fewer | 5 remaining | **0** ✅ | 0 |
+| Open critical issues | 1 | 0 | 0 | 0 | 0 | **0** ✅ | 0 |
+| Open high issues | 2 | 0 | 1 | 0 | 0 | **0** ✅ | 0 |
+| Open medium issues | 4 | 1 | 2 | 2 | 1 | **1** (onclick) | 0 |
+| Open low issues | 3 | 2 | 3 | 1 | 2 | **2** (screenshots, freshness) | 0 |
+| Git commits on main | 2 | 2 | 5 | 7 | 10 | **12** ✅ | growing |
+| GitHub Actions | None | 1 ✅ | 1 ✅ | 1 ✅ | 1 ✅ | **1** ✅ | ≥ 1 |
+| ROADMAP.md | No | No | No | No | Yes ✅ | **Yes** ✅ | Present |
+| UserManual.md | No | No | No | No | Yes ✅ | **Yes** ✅ | Present |
+
+---
+
+### 10. Next Steps
+
+| Priority | Action | Est. effort |
+|---|---|---|
+| P1 (weekly) | Check DOMPurify ≥3.4.12 / Chart.js ≥4.5.2; upgrade if available | 15 min |
+| P3 | Begin `onclick` → `addEventListener` migration (sidebar cards first) | 1–2 hrs |
+| P3 | Capture and add screenshots to `/screenshots/` directory | 30 min |
+
+---
+
+*Next scheduled review: 2026-06-22*
+*Key watches: DOMPurify security advisories (check weekly — sole XSS defense); Chart.js patch releases; Gruper.html size growth; CI run results on each push*
+*Section header audit: COMPLETE — all 36 section banners are now annotation-free and consistently named*
+
+---

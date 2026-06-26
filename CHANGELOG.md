@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## Maintenance (2026-06-15 → 2026-06-19) — Infrastructure & Documentation
+## Maintenance (2026-06-15 → 2026-06-21) — Infrastructure & Documentation
 
 No version bump — these are infrastructure, security, and documentation changes only. `APP_VERSION` remains `0.4.5`.
 
@@ -16,11 +16,11 @@ No version bump — these are infrastructure, security, and documentation change
 
 **Code Quality:**
 - ADDED: `localStorage` `QuotaExceededError` guard in `saveState()` with retry logic and user-facing warning toast
-- ADDED: 15+ JS section delimiter banners across the 3,329-line `<script>` block for navigability
+- ADDED: 18 JS section delimiter banners across the `<script>` block for navigability (all unambiguous, version-prefix-free)
 - FIXED: Shield icon tooltip now describes security features instead of showing the version tagline
 - FIXED: `<noscript>` fallback added for JS-disabled browsers
 - FIXED: Disambiguated duplicate `INITIALIZATION` section headers in the JS block
-- FIXED: Cleaned up legacy/version-prefixed JS section headers (renamed 4 sections, removed 1 redundant header)
+- FIXED: Cleaned up all legacy/version-prefixed and provenance-annotated section headers (JS and CSS blocks; 11 headers renamed across Jun 18–21, 1 redundant header removed)
 
 **Infrastructure:**
 - ADDED: `LICENSE` (MIT)

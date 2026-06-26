@@ -42,6 +42,8 @@ The single-file ethos becomes a constraint if/when `Gruper.html` grows beyond ~5
 | 2026-06-19 | Create `UserManual.md` |
 | 2026-06-19 | Add `CHANGELOG.md` maintenance section for June 2026 infrastructure work |
 | 2026-06-19 | Clean up README screenshot placeholder; add doc cross-links |
+| 2026-06-20 | Rename JS section headers: `UI RENDERING` → `SIDEBAR & AGENT CONFIG`, `CONVERSATION ENGINE` → `TASK INPUT & VALIDATION`, two version-prefixed headers cleaned |
+| 2026-06-21 | Strip remaining provenance/version annotations from 7 section headers (2 CSS + 5 JS); update CHANGELOG date range; refresh ROADMAP |
 | v0.4.5 | Streamlined round summary, removed verbose analysis blocks |
 | v0.4.4 | Version display consistency, embedded changelog extracted |
 | v0.4.3 | Critical `agents.find` bug fix |
@@ -123,5 +125,5 @@ Items that are desirable but require more design work or carry higher risk.
 
 ---
 
-*Last updated: 2026-06-20 by Claude (routine review)*
+*Last updated: 2026-06-21 by Claude (routine review)*
 *Maintained alongside `DailyClaudeRoutineCheckup.md` — review and update at each daily check.*
