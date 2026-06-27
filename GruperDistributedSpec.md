@@ -1,16 +1,15 @@
 ---
 title: "Gruper Distributed — AI Workforce Platform (Technical Specification)"
-working_name: "Gruper Distributed (extension of Gruper core)"
-spec_version: "0.1 — Design Draft"
-product_status: "Pre-release / Pre-v1 (no v1.0 until the first stable release ships)"
-core_baseline: "Gruper v0.4.5 (single-file local multi-agent app)"
+working_name: "Gruper Distributed (companion extension of Gruper core)"
+spec_version: "0.2 — Design Draft"
+product_status: "Pre-release / Pre-v1 — no v1.0 until the first stable release ships"
+core_baseline: "Gruper v0.4.5 (single-file local multi-agent conversation system)"
 date: "2026-06-27"
 owner: "Jacob Nowatzke — Stelminado, LLC"
 related_projects:
-  - "Gruper core (Gruper.html — single-file local multi-agent conversation system)"
+  - "Gruper core (Gruper.html — single-file local multi-agent conversation system, v0.4.5)"
   - "SteloPTC (Tauri/Svelte tissue-culture specimen tracking with local AI)"
-  - "n8n + Ollama self-hosted automation (\"AI secretary\" workflows)"
-  - "RadioDoge (LoRa mesh / resilient messaging — optional bridge)"
+  - "n8n + Ollama self-hosted automation (AI-secretary and workflow automation)"
 audience: "Implementation planning; suitable to hand to a contractor or self-implement"
 ---
 
@@ -18,41 +17,46 @@ audience: "Implementation planning; suitable to hand to a contractor or self-imp
 
 ## A note on versioning (read this first)
 
-**Gruper Distributed is not at v1.0, and this document is not a "v2" spec.**
+**Gruper Distributed is pre-v1. This document is not a "v2" spec. There is no v1 yet.**
 
-The earlier draft of this document labeled itself "v2.0." That was wrong. Gruper *core* is at v0.4.5; the distributed extension described here has **not shipped anything yet**. There is no v1.
+Gruper *core* is at v0.4.5 — a mature, stable, single-file application. The distributed extension described here has shipped nothing. It begins at the design stage. v1.0 is a *future finish line*, not a starting point.
 
-To keep this honest and unambiguous, this project uses an explicit pre-release track:
+This project uses a pre-release milestone track to stay honest:
 
 | Track | Meaning |
 |-------|---------|
-| **`gd-0.1` … `gd-0.9`** | Pre-release design + build milestones for Gruper Distributed. This is where we are. |
-| **`gd-1.0` (v1.0)** | **Declared only when the first stable release ships** — installable agent runtime, working orchestrator, working cross-network sharing, security model in place, and real users running it. The roadmap is rewritten at that point to reflect that we have *reached* v1. |
-| **`gd-1.x+`** | Post-v1 hardening, federation, ecosystem. |
+| **`gd-0.1` … `gd-0.9`** | Pre-release design and build milestones. **This is where we are.** |
+| **`gd-1.0` (v1.0)** | Declared only when the first stable release ships — installable agent runtime, working orchestrator, working cross-network sharing, security model validated, real users running it. The roadmap is rewritten at that point. |
+| **`gd-1.x+`** | Post-v1 hardening, federation, ecosystem expansion. |
 
-So when you see version numbers in this document, they refer to **pre-1.0 milestones unless explicitly stated otherwise.** "v1.0" is always a *future* target — a finish line for the first release, not the starting line. The roadmap (Section 11) is built around that finish line.
+All version numbers in this document refer to pre-1.0 milestones. The roadmap (§11) is built toward that finish line, not from it.
 
-> The product name "Gruper Distributed" is a **working name**, not a final decision. See the reflection at the end for alternatives.
+> **Working name:** "Gruper Distributed" is the working name through the pre-release track. Final branding decisions happen closer to v1.0. See the reflection appendix for alternatives.
 
 ---
 
 ## Executive Summary
 
-**Gruper Distributed** extends the proven local agent patterns of Gruper core into a secure, local-first platform for deploying and orchestrating fleets of AI agents that act as virtual employees, managers, researchers, analysts, and automation specialists.
+**Gruper Distributed** is a secure, local-first platform for deploying and orchestrating fleets of AI agents that act as virtual employees, managers, researchers, analysts, and automation specialists. It is a **companion extension of Gruper core** — not a replacement, not a rewrite.
 
-Gruper core today runs up to six configurable AI agents in a single browser file, talking to a local Ollama/LocalAI backend, with conversation memory, consensus detection, analytics, and a streamlined glassmorphism UI. It is deliberately client-only and single-file. Gruper Distributed keeps that local-first ethos but answers a question core cannot: *what if the agents don't all have to run on this one machine, on this one network?*
+Gruper core (v0.4.5) already delivers up to six configurable AI agents in a single browser file: local Ollama/LocalAI inference, conversation memory, consensus detection, an analytics dashboard, 12 agent role templates, and a streamlined glassmorphism UI. It is deliberately client-only, requires no server, and opens with a double-click. Gruper Distributed preserves that local-first philosophy and reuses its patterns directly — but it answers a question core cannot: *what if your agents don't all have to run on this one machine, on this one network?*
 
-**The defining breakthrough of this design** is that agents are no longer confined to a single user's local network:
+**The headline capability** is that agents are no longer confined to a single user's local network:
 
-- **LAN agents** — desktops, laptops, and always-on mini-PCs (Intel NUC, Beelink) on your own network.
-- **Cloud agents** — AWS EC2 instances (Dockerized, auto-registering, spot-friendly), including GPU inference instances for heavy local-model work.
-- **Permissioned cross-user agents** — *the headline capability.* You, in Houston, can add a trusted collaborator's computer in San Diego as an assignable agent in your fleet and task it directly. They can do the same with yours. The remote machine appears in your Manager Console as a first-class, scoped resource — no shared LAN, no port forwarding, no screen sharing, no VPN setup required.
+- **LAN agents** — your desktops, laptops, and always-on mini-PCs (Intel NUC, Beelink) at home or in the office.
+- **Cloud agents** — AWS EC2 instances (Dockerized, auto-registering, spot-friendly), including GPU inference instances for heavy workloads.
+- **Permissioned cross-user agents** — you, in Houston, can add a trusted collaborator's computer in San Diego as an assignable agent in your fleet and task it directly. They can do the same with yours. The remote machine appears in your Manager Console as a first-class, scoped resource — no shared LAN, no port forwarding, no screen sharing, no VPN configuration required.
 
-This turns idle personal hardware plus cheap cloud burst into an **elastic, location-independent AI workforce grid.** Tasks — research, report generation, data analysis, workflow execution, document drafting, customer simulation — can be explicitly assigned to a specific remote agent or routed to a capability-matched pool, with live monitoring, queuing, result streaming, and a full audit trail across ownership and geographic boundaries.
+This turns idle personal hardware and cheap cloud burst into an **elastic, location-independent AI workforce grid.** Tasks — research synthesis, protocol analysis, data processing, report generation, document drafting, scheduling — can be explicitly assigned to a specific remote agent or routed to a capability-matched pool, with live monitoring, queuing, result streaming, and a full audit trail.
 
-The system prioritizes **privacy** (Ollama local inference first), **security** (sandboxing, fine-grained sharing ACLs, instant revocation, optional end-to-end encryption), **usability** (one Tauri desktop console, one-click installers, QR/share-token onboarding), and **integration with the existing stack** (n8n workflows, RadioDoge bridge, SteloPTC-style structured data discipline).
+The system is designed for users who cannot afford the privacy and compliance risks of centralized SaaS AI, but who need more compute and geographic flexibility than a single machine provides. Target users include:
 
-Target users mirror Stelminado's own world: a solo operator scaling toward a 10–20 person consulting/business footprint, small trusted teams, pharma/biotech labs needing reliable structured processes, and collaborator networks who want to share compute *without* surrendering control to a centralized SaaS.
+- **Solo operators and small consulting businesses** (10–20 person scale) scaling AI-assisted workflows without surrendering control.
+- **Pharma startups and biological research labs** — protocol optimization pipelines, experiment data analysis, tissue culture workflow extensions (building on SteloPTC patterns), and compliance audit trails for regulated environments.
+- **Astronomy observatory renters and remote science teams** — overnight data processing agents, scheduling automation, remote telescope monitoring and anomaly flagging without requiring an on-site operator.
+- **Trusted collaborator networks** who want to share idle compute across geographic boundaries while retaining owner sovereignty over their machines.
+
+The system prioritizes **privacy** (Ollama local inference first, on-prem by default), **security** (sandboxing, fine-grained sharing ACLs, instant revocation, end-to-end payload encryption for cross-user tasks), **usability** (one Tauri desktop console, one-click installers, QR/share-token onboarding), and **integration with the existing stack** (n8n workflows, SteloPTC-style structured data discipline, Gruper core's proven conversation and analytics UX).
 
 ---
 
@@ -60,99 +64,120 @@ Target users mirror Stelminado's own world: a solo operator scaling toward a 10�
 
 ### 1.1 Vision
 
-A trusted person — not a faceless cloud — should be able to lend you an AI worker. Your fleet should span your desk, your closet mini-PC, a spot GPU in `us-west-2`, and a friend's gaming rig two time zones away, and it should *feel like one console*. Local and private by default; distributed and elastic when you choose; always under explicit, revocable, auditable control.
+A trusted person — not a faceless cloud platform — should be able to lend you an AI worker. Your fleet should span your desk, your closet mini-PC, a spot GPU in `us-west-2`, and a colleague's workstation two time zones away, and it should *feel like one console*. Local and private by default; distributed and elastic when you choose; always under explicit, revocable, auditable control.
+
+For a pharma startup running overnight protocol optimizations, a biological lab tracking cross-site specimen experiments, or an observatory team processing a night's imaging run from a remote location — the same infrastructure should serve all of them, because the underlying need is identical: trustworthy agents running on the right hardware, without requiring a permanent IT department.
 
 ### 1.2 Primary Goals
 
-- **True distributed agent execution** across heterogeneous environments and ownership boundaries — LAN, cloud, and other people's machines.
-- **The "not just my own network" requirement, concretely:** a Manager Console in Houston can task an agent on a collaborator's PC in San Diego, or on AWS GPU instances in `us-west-2`, over the public internet, with no inbound networking on the agent side.
-- **Symmetric, owner-controlled sharing** — vice-versa assignment with strong scoping and an instant kill switch.
-- **Leverage existing hardware** — idle employee/collaborator laptops, gaming PCs, home servers — plus cheap cloud burst (spot, idle-time GPU).
-- **Keep sensitive workloads local or on explicitly trusted nodes;** use cloud only for non-sensitive parallel work, by policy.
-- **Build on what already works** — Gruper's local agent/conversation patterns and UX, SteloPTC's Tauri/Svelte discipline, and the current n8n + Ollama automation.
+- **True distributed agent execution** across heterogeneous environments and ownership boundaries — your LAN, the cloud, and other people's machines.
+- **The "not just my own network" requirement, concretely:** a Manager Console in Houston can task an agent on a collaborator's PC in San Diego, or on AWS GPU instances in `us-west-2`, over the public internet, with no inbound networking required on the agent side.
+- **Symmetric, owner-controlled sharing** — vice-versa assignment with granular scoping and an instant kill switch.
+- **Leverage existing hardware** — idle collaborator laptops, gaming PCs, home servers — plus cheap cloud burst (spot instances, idle-time GPU).
+- **Keep sensitive workloads local or on explicitly trusted nodes** — cloud only for non-sensitive parallel work, enforced by data-class policy.
+- **Build directly on what already works** — Gruper core's local Ollama integration, conversation engine, 12 agent role templates, analytics patterns, and circuit-breaker reliability disciplines; SteloPTC's Tauri/Svelte UI patterns; and the current n8n + Ollama automation stack.
 
 ### 1.3 Non-Goals (for the pre-1.0 track)
 
-- **No fully decentralized / blockchain marketplace.** A public, trustless compute grid with token incentives is explicitly out of scope until well after v1.
-- **No open, anyone-can-join grid.** Sharing starts **closed and invite-only**. Strangers cannot dispatch to your machines.
-- **No execution of arbitrary untrusted code from people you don't trust.** Everything runs sandboxed and ACL-gated; the trust model assumes a *known* collaborator circle.
-- **No replacement of Gruper core.** Core stays single-file, client-only, and standalone. Distributed is a *separate companion system* that reuses core's patterns and (optionally) embeds core's UI — it does not require core to grow a backend.
-- **No mobile-first console** before the desktop console is solid (mobile monitoring is a later add).
+- **No fully decentralized / blockchain marketplace.** A public trustless compute grid with token incentives is out of scope until well after v1.0.
+- **No open, anyone-can-join grid.** Sharing starts closed and invite-only. Strangers cannot dispatch to your machines.
+- **No arbitrary untrusted code execution.** Everything runs sandboxed and ACL-gated; the trust model assumes a known, vetted collaborator circle.
+- **No replacement of Gruper core.** Core stays single-file, client-only, and standalone. Distributed is a *separate companion system* that reuses core's patterns and optionally embeds its UI. Core does not grow a backend.
+- **No mobile-first console** until the desktop console is solid. Mobile monitoring comes later.
 
-### 1.4 Success Criteria (what "good" looks like before we even talk about v1)
+### 1.4 Success Criteria
+
+These are the acceptance bar for the first stable release. v1.0 is declared only when all of these hold for real users.
 
 | # | Criterion | Target |
 |---|-----------|--------|
-| SC-1 | Time to add a remote agent (San Diego PC or AWS) to a fleet and receive its first task with end-to-end result return | **< 5 minutes** from install |
-| SC-2 | Dispatch overhead for a remote task (excluding actual model execution) | **< 5–10 s** typical |
-| SC-3 | Owner revocation of a shared agent takes effect | **Immediately** — no new tasks accepted, in-flight tasks killable |
-| SC-4 | All traffic authenticated + encrypted + auditable | **100%** of connections; no anonymous dispatch |
+| SC-1 | Time to add a remote agent (San Diego PC or AWS) to a fleet and receive its first task result end-to-end | **< 5 min** from install |
+| SC-2 | Dispatch overhead for a remote task, excluding model execution time | **< 5–10 s** typical |
+| SC-3 | Owner revocation of a shared agent takes effect | **Immediately** — no new tasks accepted; in-flight tasks killable |
+| SC-4 | All traffic authenticated, encrypted, and auditable | **100%** of connections; no anonymous dispatch |
 | SC-5 | Works behind consumer NAT, corporate firewalls, and AWS without inbound ports | **No port forwarding ever required on agents** |
-| SC-6 | Sensitive task never leaves an unauthorized boundary | **Policy-enforced**; confidential tasks only routed to compliant agents |
+| SC-6 | Sensitive task never leaves an unauthorized boundary | **Policy-enforced**; confidential tasks routed only to compliant agents |
 | SC-7 | Field laptop loses internet mid-task | **Local queue survives**, syncs on reconnect, no data loss |
-
-These criteria are the *acceptance bar for the first stable release.* When they all hold for real users, that is when we discuss declaring v1.0.
 
 ---
 
 ## 2. Key Use Cases
 
 ### UC-1 — Cross-City Direct Assignment (Houston ↔ San Diego) — *the defining case*
-You (Houston) have a multi-hour research + synthesis task. Your collaborator in San Diego runs the agent runtime on a 64 GB / RTX 4090 desktop. From your Manager Console you assign the task **directly to their machine**. Their agent executes against their local Ollama (or a model you specify), streams progress, and returns the final report plus artifacts. You never RDP, screen-share, or touch their network config. They granted you a scoped share token; they can revoke it in one click.
+
+You (Houston) have a multi-hour research and synthesis task. Your collaborator in San Diego runs the agent runtime on a 64 GB / RTX 4090 workstation. From your Manager Console you assign the task **directly to their machine** — it uses their local Ollama and whatever model capabilities you specified. Their agent streams progress back; you receive the final report and artifacts. You never RDP, screen-share, or touch their network config. They granted you a scoped share token; they can revoke it in one click.
 
 ### UC-2 — Hybrid Local + Cloud Burst
-Daily lightweight interactive agents run on your laptop and home mini-PC (low latency, private). For a big parallel job, you launch 4× AWS spot instances as `DataCruncher` agents. They auto-register on boot, appear in your fleet, accept partitioned work, and self-terminate on idle timeout or when the queue drains — with a hard budget cap.
+
+Daily lightweight interactive work runs on your laptop and home mini-PC (low latency, private, Ollama-local). For a large parallel analysis job — say, screening 200 protein variants for a pharma client — you spin up 4× AWS spot GPU instances as `DataCruncher` agents. They auto-register on boot, appear in your fleet, accept partitioned work, and self-terminate on idle timeout when the queue drains — with a hard budget cap enforced before the first instance launches.
 
 ### UC-3 — Employee / Contractor Compute Contribution
-A part-time researcher in another state installs the desktop agent on their personal laptop. You grant them the right to submit *certain task types* to *your* agents; they grant you the right to assign *research tasks* to *their* machine **during agreed hours only**. Mutual benefit, explicit boundaries, both sides auditable.
+
+A part-time researcher in another state installs the desktop agent on their personal laptop. You grant them the right to submit certain task types to your agents; they grant you the right to assign research tasks to their machine during agreed hours only. Both sides can audit every task dispatched. Mutual benefit, explicit scope, instant revocation available to either party.
 
 ### UC-4 — Hierarchical Manager Agents
-A "Lead Researcher" meta-agent on your always-on orchestrator node decomposes a goal, assigns sub-tasks to the best available agents (local for quick context, the San Diego high-RAM box for heavy lifting, AWS for parallel web research), aggregates results, and produces the final output. A human manager assigns to the manager agent; the manager agent assigns to worker agents — including across ownership boundaries, within the policies it's allowed to use.
 
-### UC-5 — Resilience / Offline Tolerance (rural TX, travel)
-A field laptop loses internet. Locally-targeted tasks keep running from a local queue. When connectivity returns, it reconciles with the orchestrator (results uploaded, new assignments pulled). Optionally, the **RadioDoge LoRa bridge** carries tiny coordination messages when there's no internet at all.
+A "Lead Researcher" meta-agent on your always-on orchestrator decomposes a goal, assigns sub-tasks to the best available agents (local for low-latency context gathering, the San Diego high-RAM box for heavy model inference, AWS for parallel web research), aggregates results, and delivers the final output. A human manager assigns the goal to the manager agent; the manager agent dispatches to worker agents — including across ownership boundaries, within the scopes its token allows. Every dispatch is auditable.
 
-### UC-6 — Lab / Compliance Workflow (ties to SteloPTC + biotech mindset)
-Structured, reliable, auditable pipelines: a protocol-optimization task is decomposed, run across agents, and every assignment/outcome is logged immutably for LLC recordkeeping. Confidential inputs are tagged and prevented from routing to non-compliant (e.g., non-US, non-on-prem) agents.
+### UC-5 — Pharma / Biotech Protocol Pipeline
 
-### UC-7 — On-the-Go Monitoring (Uber driving, travel)
-A lightweight read-only view (later: PWA/mobile) lets you watch fleet status and approve human-gated actions from your phone between rides — without a laptop.
+A pharma startup needs overnight protocol optimization runs on experimental data. A Lead Protocol agent decomposes the analysis, routes sub-tasks to local high-RAM agents for sensitive patient-adjacent data (US jurisdiction, on-prem only), and to cloud agents for publicly derived reference data. Every agent invocation, parameter set, and result is logged immutably to the hash-chained audit log — producing a compliance record. The Manager Console view mirrors SteloPTC's structured-data discipline: inputs and outputs are typed, validated, and traceable.
+
+### UC-6 — Biological Lab / SteloPTC Extension
+
+A tissue culture lab running SteloPTC for specimen tracking extends its monitoring with Gruper Distributed agents: an always-on mini-PC agent watches sensor feeds and flags contamination risk events; a scheduler agent plans passage timelines and triggers n8n workflows for notifications. The distributed layer adds cross-site coordination — a second lab location's agent node participates in the same fleet, sharing specimen status data under a tightly scoped grant with explicit data-class restrictions.
+
+### UC-7 — Astronomy Observatory Remote Operations
+
+An astronomy observatory renter books telescope time overnight. A remote monitoring agent on the observatory's always-on node (running as a shared agent under a scoped grant to the renter) handles scheduling, telescope control callbacks, and anomaly detection. A processing agent on the renter's home workstation ingests the imaging data as it arrives. The renter sees live task status from their laptop without needing to stay awake — and can approve any human-gated action from their phone.
+
+### UC-8 — Resilience / Offline Tolerance (rural TX, travel)
+
+A field laptop loses internet mid-task. Locally-targeted tasks continue running from the on-device queue. When connectivity returns, the agent reconciles with the orchestrator: results uploaded, new assignments pulled, no data lost. The exponential-backoff reconnect pattern mirrors Gruper core's existing API retry discipline (2 s / 4 s / 8 s / 16 s), applied now to the persistent orchestrator connection rather than a single API call.
+
+### UC-9 — On-the-Go Monitoring
+
+A lightweight read-only view (later: PWA / Tauri mobile) lets you watch fleet status and approve human-gated actions from your phone between tasks — without requiring a laptop. Out of scope for the first release; the data model must not preclude it.
 
 ---
 
 ## 3. Architecture Overview
 
-### 3.1 The one principle that makes cross-network work
+### 3.1 The principle that makes cross-network work
 
-**Every agent makes an *outbound* authenticated, persistent connection to an orchestrator.** Nothing ever connects *into* an agent. This single decision is what lets a San Diego desktop, a corporate-firewalled laptop, and an AWS instance all participate identically — outbound 443 is essentially always allowed, NAT is traversed by the agent dialing out, and the orchestrator becomes a reliable relay for pushing tasks and streaming results back. Direct peer-to-peer is an *optimization* layered on top later, never a requirement.
+**Every agent makes an *outbound* authenticated, persistent connection to an orchestrator. Nothing ever connects *into* an agent.**
+
+This single decision is what lets a San Diego desktop, a corporate-firewalled laptop, and an AWS spot instance all participate identically. Outbound port 443 is allowed virtually everywhere; NAT is traversed by the agent dialing out; and the orchestrator becomes a reliable relay for pushing tasks and streaming results back. Direct peer-to-peer is an optimization added later — it is never a requirement for the system to function.
+
+This relay model extends a pattern Gruper core already uses: core's agents dial out to a local Ollama endpoint and stream responses back. Gruper Distributed generalizes that outbound-connection discipline to the persistent orchestrator channel.
 
 ### 3.2 Component map
 
 ```mermaid
 flowchart TB
-    subgraph Console["Manager Console — Tauri + Svelte (Houston, or anywhere)"]
-        UI["Fleet view · Task composer · Sharing panel · Monitoring · Crew builder"]
+    subgraph Console["Manager Console — Tauri + Svelte\n(Houston, or anywhere)"]
+        UI["Fleet view · Task composer · Sharing panel\nMonitoring · Crew builder\n[embeds Gruper core conversation + analytics UI]"]
     end
 
-    subgraph Orch["Orchestrator Service (self-host: VPS / always-on PC / Docker)"]
-        REG["Agent Registry\n(capabilities, status, ownership, ACLs)"]
+    subgraph Orch["Orchestrator Service\n(self-host: VPS / always-on PC / Docker Compose)"]
+        REG["Agent Registry\n(capabilities · status · ownership · ACLs)"]
         DISP["Dispatcher\n(explicit assign · capability match · queue · retries)"]
-        AUDIT["Audit log (append-only) · Monitoring · Auth"]
+        AUDIT["Audit log (append-only, hash-chained)\nMonitoring · Auth"]
     end
 
-    UI -- "TLS: gRPC / WSS (auth tokens)" --> Orch
+    UI -- "TLS: WSS / gRPC (auth tokens)" --> Orch
 
     subgraph LAN["Your LAN"]
-        A1["Agent Node — laptop\nOllama · sandbox · tools"]
-        A2["Agent Node — mini-PC (always on)"]
+        A1["Agent Node — laptop\nOllama · sandbox · tools\n[Gruper core Ollama integration]"]
+        A2["Agent Node — mini-PC (always-on)\nOllama · sandbox · tools"]
     end
 
     subgraph Cloud["AWS / Cloud"]
-        A3["Agent Node — EC2 (Docker)\nGPU Ollama · auto-register · spot"]
+        A3["Agent Node — EC2 (Docker)\nGPU Ollama · auto-register · spot\ncost caps · idle auto-terminate"]
     end
 
     subgraph Remote["Collaborator (San Diego)"]
-        A4["SHARED Agent Node — their PC\nOwner-controlled · scoped rights"]
+        A4["SHARED Agent Node — their PC\nOwner-controlled · scoped token\nOwner retains instant revoke"]
     end
 
     A1 -- "outbound WSS (solves NAT)" --> Orch
@@ -161,7 +186,7 @@ flowchart TB
     A4 -- "outbound WSS" --> Orch
 
     A1 -. "optional mDNS direct (LAN only)" .- A2
-    A3 -. "optional P2P (WebRTC/QUIC) for large artifacts" .- A1
+    A3 -. "optional P2P — WebRTC/QUIC (post-MVP, large artifacts)" .- A1
 ```
 
 ### 3.3 Request lifecycle (explicit cross-network assignment)
@@ -170,65 +195,70 @@ flowchart TB
 sequenceDiagram
     participant M as Manager Console (Houston)
     participant O as Orchestrator
-    participant A as Agent (San Diego, shared)
-    M->>O: Submit task (target = san-diego-uuid, share-token)
-    O->>O: Verify token scope, quotas, time window, data class
-    O->>O: Enqueue (priority, deadline)
+    participant A as Shared Agent (San Diego)
+
+    M->>O: Submit task (target=san-diego-uuid, share-token, data-class)
+    O->>O: Verify token scope · quotas · time window · data class
+    O->>O: Enqueue (priority · deadline)
     O-->>A: Push task over existing outbound WSS
-    A->>A: Validate dispatcher authz + sandbox setup
-    A-->>O: ACK + status: running, heartbeats
+    A->>A: Validate dispatcher authz · spin up per-task sandbox
+    A-->>O: ACK + status=running · heartbeats
     A-->>O: Stream progress / partial results
     A->>O: Final result + artifacts (or artifact reference)
-    O-->>M: Stream progress, deliver result
-    O->>O: Append immutable audit event
-    Note over O,A: Owner may revoke at any point → O stops dispatch, signals A to abort
+    O-->>M: Stream progress · deliver result
+    O->>O: Append immutable audit event (hash-chained)
+    Note over O,A: Owner revokes at any point → O stops dispatch · signals A to abort in-flight task
 ```
 
-### 3.4 Trust topology (who can task whom)
+### 3.4 Trust topology
 
 ```mermaid
 flowchart LR
-    JM["Jacob (manager identity)"] -->|owns| JA["Jacob's agents"]
-    CM["Collaborator (San Diego)"] -->|owns| CA["Collaborator's agents"]
+    JM["Jacob\n(manager identity)"] -->|owns| JA["Jacob's agents\n(LAN + cloud)"]
+    CM["Collaborator\n(San Diego)"] -->|owns| CA["Collaborator's agents\n(their PC)"]
     CM -->|grants scoped token| JM
     JM -->|grants scoped token| CM
-    JM -->|may task| CA
-    CM -->|may task| JA
-    classDef o fill:#1f2937,color:#fff;
-    class JA,CA o;
+    JM -->|may task within scope| CA
+    CM -->|may task within scope| JA
+    classDef agent fill:#1f2937,color:#e5e7eb,stroke:#374151;
+    class JA,CA agent;
 ```
 
 ---
 
 ## 4. Component Breakdown — Agent Runtime (Worker)
 
-The Agent Runtime is the program that turns a machine into an assignable AI worker. It has two delivery paths (desktop and container) over **one shared core**.
+The Agent Runtime is the program that turns a machine into an assignable AI worker. Its execution model and Ollama integration are **built directly on the patterns established in Gruper core**: the same local Ollama endpoint format, the same model parameter scheme (temperature, top-p, top-k, repeat penalty, max tokens, context length), and the same circuit-breaker / retry discipline. What changes is that the runtime now receives tasks from an orchestrator over a persistent connection rather than from a browser UI over an HTTP call.
 
 ### 4.1 Delivery paths
 
 | Path | Targets | Packaging | Lifecycle |
 |------|---------|-----------|-----------|
-| **Desktop** | Windows / macOS / Linux laptops & desktops, mini-PCs | Tauri app + background service (systemd / launchd / Windows Service) | "Install as Agent Node" wizard; optional Ollama install; LAN mDNS optional |
-| **Container** | AWS EC2, VPS, on-prem servers, NUC/Beelink | Multi-arch Docker image (CPU + CUDA variants) | `docker run` / Terraform / user-data; reads env secrets; auto-registers |
+| **Desktop** | Windows / macOS / Linux laptops, desktops, mini-PCs | Tauri app + background service (systemd / launchd / Windows Service) | "Install as Agent Node" wizard; optional Ollama bootstrap; mDNS LAN discovery optional |
+| **Container** | AWS EC2, VPS, on-prem servers, NUC/Beelink | Multi-arch Docker image (CPU + CUDA variants) | `docker run` or Terraform; reads env secrets; auto-registers on boot |
 
-> **Cross-network enabler:** both paths do the *same outbound registration handshake*. A desktop in San Diego and an EC2 box in Oregon are indistinguishable to the orchestrator except for their reported capabilities and owner.
+> **Cross-network enabler:** both paths execute the same outbound registration handshake. A desktop in San Diego and an EC2 instance in Oregon are indistinguishable to the orchestrator except for their reported capabilities and owner identity.
 
 ### 4.2 Installation UX
 
-- **Desktop:** single download → **"Install as Agent Node"** → service installed, optional Ollama bootstrap, paste/scan an **orchestrator URL + registration token** (QR-code friendly for non-technical collaborators). Agent dials out, registers, appears in the owner's fleet within seconds.
-- **AWS / container:**
-  ```bash
-  docker run -d --restart=unless-stopped \
-    -e ORCHESTRATOR_URL=wss://orch.example.com \
-    -e REGISTRATION_TOKEN=*** \
-    -e AGENT_TAGS="datacruncher,us-west-2" \
-    -e ROLE="data_analyst" \
-    --gpus all \
-    ghcr.io/stelminado/gruper-agent:cuda
-  ```
-  A Terraform module wraps this for spot fleets with budget caps and idle auto-termination.
+**Desktop:**
+Single installer download → **"Install as Agent Node"** → background service installed, optional Ollama bootstrap, paste or scan an orchestrator URL + registration token (QR-code-friendly for non-technical collaborators). The agent dials out, registers, and appears in the owner's fleet within seconds.
+
+**Container / AWS:**
+```bash
+docker run -d --restart=unless-stopped \
+  -e ORCHESTRATOR_URL=wss://orch.example.com \
+  -e REGISTRATION_TOKEN=*** \
+  -e AGENT_TAGS="datacruncher,us-west-2" \
+  -e ROLE="data_analyst" \
+  --gpus all \
+  ghcr.io/stelminado/gruper-agent:cuda
+```
+A Terraform module wraps this for spot fleets with idle auto-termination and hard budget caps.
 
 ### 4.3 Capabilities reported on registration
+
+The capability schema extends Gruper core's per-agent configuration (model, parameters, role template) into a machine-level registration record the orchestrator uses for matching and ACL enforcement.
 
 ```json
 {
@@ -237,282 +267,383 @@ The Agent Runtime is the program that turns a machine into an assignable AI work
   "name": "SanDiego-Workstation",
   "location_tag": "collab-san-diego",
   "jurisdiction": "US",
-  "hardware": { "cpu_cores": 16, "ram_gb": 64, "gpu": "RTX 4090 24GB", "disk_gb": 2000 },
+  "hardware": {
+    "cpu_cores": 16,
+    "ram_gb": 64,
+    "gpu": "RTX 4090 24GB",
+    "disk_gb": 2000
+  },
   "models": ["llama3.1:70b", "qwen2.5-coder:32b"],
   "tools": ["code_interpreter", "web_search", "file_read", "n8n_webhook"],
   "roles": ["researcher", "data_analyst"],
   "network": { "type": "residential", "latency_class": "medium" },
-  "availability": { "windows": ["Mon-Fri 09:00-18:00 America/Los_Angeles"] },
+  "availability": {
+    "windows": ["Mon-Fri 09:00-18:00 America/Los_Angeles"]
+  },
   "runtime_version": "gd-0.1.0",
   "status": "idle",
   "last_heartbeat": "2026-06-27T00:00:00Z"
 }
 ```
 
-Capabilities feed the registry's matching index. `jurisdiction` and `availability` exist from day one because they are required for the sharing/compliance model, even if matching on them is simple at first.
+`jurisdiction` and `availability` are present from the first milestone because they are required for compliance-driven data-class routing (pharma/biotech use cases), even if the matching logic is simple initially.
 
 ### 4.4 Execution model
 
-- Receives a task as JSON pushed over the existing outbound connection.
-- Spins up an **isolated sandbox per task** (see §8.3).
-- Primary inference: **Ollama** at the local endpoint, or a user-specified remote Ollama URL. OpenAI-compatible function calling so tools are portable.
-- Agent loop: start with a **custom ReAct / plan-execute loop**; design the task/state schema so a graph engine (LangGraph-style) can be slotted in without breaking the wire contract. *(See §10 for the framework decision and its open question.)*
-- Streams incremental progress, partial output, and a final result + artifacts back over the connection.
-- Supports long-running tasks via **heartbeats and resumable checkpoints** (critical for UC-5 offline tolerance).
+The agent loop runs as follows:
 
-### 4.5 Sandboxing & safety (non-negotiable, expanded in §8)
+1. Receives a task as JSON pushed over the persistent outbound connection.
+2. Validates the dispatching authority against its local copy of the share-token / grant.
+3. Spins up an **isolated per-task sandbox** (§8.3 — non-negotiable).
+4. Runs the agent reasoning loop against the **local Ollama endpoint** (same API and parameter conventions as Gruper core), using OpenAI-compatible function calling so tools are portable.
+5. The agent loop starts as a **custom ReAct / plan-execute implementation** whose task/state schema is designed to accept a graph-engine replacement (LangGraph-style) without breaking the wire contract (see OQ-1).
+6. Streams incremental progress, partial output, and a final result + artifacts back over the connection to the orchestrator, which relays them to the submitter.
+7. Maintains **heartbeats and resumable checkpoints** for long-running tasks — critical for offline-resilience (UC-8) and observatory overnight runs (UC-7).
 
-- **Filesystem:** per-task temp dir; read-only access only to explicitly approved paths.
-- **Network egress:** allow-list per role / per shared grant; can be empty (fully offline agent).
-- **Code execution:** restricted Python/JS with timeout, memory cap, import restrictions, optional seccomp.
-- **Approval gates:** high-impact actions (send email, external POST, spend) pause for human approval per policy.
+Gruper core's circuit-breaker pattern (agent auto-disables after three consecutive failures) is carried forward: a runtime that fails repeatedly on a task type marks itself degraded and signals the orchestrator to stop routing that task class until the operator acknowledges.
+
+### 4.5 Sandboxing & safety
+
+- **Filesystem:** per-task temp directory; read-only access only to explicitly approved paths.
+- **Network egress:** per-role and per-grant allow-list; can be empty for fully offline agents.
+- **Code execution:** restricted Python / JS interpreter with timeout, memory cap, import restrictions, and optional seccomp.
+- **Approval gates:** high-impact actions (send email, external POST, spend money, write to regulated data) pause for human approval per configurable policy.
+
+Sandbox parity across desktop and container is a first-class engineering concern — see §8.3 for detail on why weak desktop sandboxing is the most likely source of security debt.
 
 ---
 
 ## 5. Component Breakdown — Orchestrator Service
 
-The orchestrator is the registry + dispatcher + auditor. It is the relay that makes cross-network assignment work without inbound agent ports.
+The orchestrator is the registry, dispatcher, and auditor. It is the relay that makes cross-network assignment work without any inbound agent ports. It also enforces every sharing ACL on every dispatch — it is the trust enforcement point for the cross-user model.
 
 ### 5.1 Recommended stack
 
 | Concern | Pre-1.0 choice | Rationale |
 |---------|----------------|-----------|
-| Core service | **Python + FastAPI** for the first milestones; **plan a Rust (axum/tonic) port of hot paths** as load and security review demand | Fastest path to a working cross-network demo using Python's agent ecosystem; Rust where safety/perf matter later. Matches the user's "prototype in Python, harden in Rust" preference. |
-| Transport | **WSS** (WebSocket over TLS) for agent links; gRPC optional later | Universally NAT/firewall friendly; simple to implement and debug |
-| Queue | **PostgreSQL** (`SKIP LOCKED` / `LISTEN-NOTIFY`) to start; Redis if throughput demands | One dependency, durable, auditable. Avoid premature Redis. |
-| DB | **PostgreSQL** (multi-user). **SQLite + Litestream** is acceptable for a single-user self-host. | JSONB capability queries; easy self-host via Docker Compose |
-| Deploy | **Docker Compose** on a cheap VPS or an always-on PC | One command self-host; no managed-cloud lock-in |
+| Core service | **Python + FastAPI** for early milestones; **Rust (axum/tonic) port of hot paths** as load and security review demand it | Fastest path to a working cross-network demo; Python's agent ecosystem velocity; Rust where memory safety and performance matter — matches the prototype-then-harden discipline |
+| Transport | **WSS** (WebSocket over TLS) for agent connections; gRPC optional later | Universally NAT/firewall-friendly; straightforward to implement and debug |
+| Task queue | **PostgreSQL** (`SKIP LOCKED` / `LISTEN-NOTIFY`) to start; Redis if throughput demands | One durable dependency, auditable, no premature infrastructure |
+| Database | **PostgreSQL** (multi-user). **SQLite + Litestream** for single-user self-host. | JSONB for capability queries; easy Docker Compose self-host |
+| Deployment | **Docker Compose** on a cheap VPS or an always-on PC | One-command self-host; no managed-cloud lock-in |
 
-One orchestrator comfortably coordinates dozens to low-hundreds of agents — far beyond the 10–20-worker target.
+One orchestrator instance comfortably coordinates dozens to low-hundreds of agents — well beyond the 10–20-worker target scale.
 
 ### 5.2 Core responsibilities
 
-- **Registry & lifecycle:** register, heartbeat, deregister; capability index for matching.
-- **AuthN/AuthZ:** identity verification + **share-ACL enforcement** on every dispatch (§8).
-- **Task intake:** from the console, the API, other agents (manager agents), or n8n webhooks.
+- **Registry & lifecycle:** register, heartbeat, deregister; capability index for matching and routing.
+- **AuthN/AuthZ:** identity verification and **share-ACL enforcement on every dispatch** (§8).
+- **Task intake:** from the Manager Console, REST API, other agents (manager agents), and n8n webhooks.
 - **Dispatch logic:**
-  - **Explicit:** `assigned_agent_id = "san-diego-uuid"`.
-  - **Capability/policy match:** "needs ≥ 32 GB RAM + `code_interpreter` + `researcher` role + `jurisdiction = US`."
-  - **Cost/latency aware:** prefer local for interactive; AWS spot for batch.
-  - **Queue management:** priorities, deadlines, retries, dead-lettering.
-- **Result & artifact collection** with streaming to the submitter.
-- **Audit logging:** immutable, append-only event stream.
-- **Resilience hooks:** agent reconnection, offline reconciliation, optional multi-orchestrator registration (failover) — *interface present early, full federation later.*
+  - *Explicit:* `assigned_agent_id = "san-diego-uuid"`.
+  - *Capability/policy match:* "needs ≥ 32 GB RAM + `code_interpreter` + `researcher` role + `jurisdiction = US`."
+  - *Cost/latency-aware:* prefer local for interactive; AWS spot for batch.
+  - *Queue management:* priorities, deadlines, retries, dead-letter handling.
+- **Result and artifact collection** with streaming to the submitter.
+- **Immutable audit logging** — hash-chained event stream (see §9 for the schema; this is the compliance record for pharma/biotech/LLC needs).
+- **Resilience hooks:** agent reconnect handling, offline reconciliation, multi-orchestrator failover interface present early — full federation deferred to post-v1.
 
-### 5.3 Sharing / cross-user model — pick one for the first release
+### 5.3 Sharing / cross-user model
 
-This is the single most consequential architectural choice. Two patterns:
+This is the single most consequential architectural decision. Two viable patterns:
 
 **Pattern A — Shared multi-tenant orchestrator (RECOMMENDED for the first release)**
-- One orchestrator instance (run by Jacob, or a small hosted service) serves multiple users.
-- Each agent registers under its **owner's** namespace/organization.
-- An owner mints a **time-limited, scoped share token** for a specific agent or group.
-- The recipient imports the token in their console; the agent appears in their fleet with the granted scope (e.g., "research tasks only, max 5 concurrent, results visible but not raw logs").
-- All traffic routes through the orchestrator; the owner keeps a global kill switch.
-- **Why first:** makes "San Diego PC shows up in the Houston console" trivial, secure, and centrally auditable. Lowest moving-part count for the headline use case.
 
-**Pattern B — Federated / direct-to-owner**
-- Each user runs their own orchestrator.
-- Sharing authorizes the recipient's orchestrator (or user) to dispatch to a specific agent; the agent multi-homes or the owning orchestrator proxies.
-- More private and more resilient (no central party sees everything) but materially more complex.
-- **Defer to a post-v1 phase.**
+One orchestrator instance (self-hosted by Jacob, or a small hosted service) serves all users. Each agent registers under its **owner's namespace**. An owner mints a **time-limited, scoped share token** for a specific agent or group. The recipient imports the token in their console; the agent appears in their fleet with the granted scope. All task traffic routes through the orchestrator; the owner retains a global kill switch.
 
-> **Recommendation:** ship **Pattern A** first. Design the data model and tokens so that **Pattern B is reachable later** (agents already speak "outbound to an orchestrator," so multi-homing is an additive change, not a rewrite). Mitigate Pattern A's central-trust weakness with **optional end-to-end payload encryption** (§8.4) so the orchestrator can relay confidential tasks it cannot read.
+*Why Pattern A first:* makes the "San Diego PC shows up in the Houston console" experience trivial, secure, and centrally auditable — the lowest moving-part count for the headline use case.
+
+**Pattern B — Federated / direct-to-owner (post-v1)**
+
+Each user runs their own orchestrator. Sharing authorizes the recipient's orchestrator to dispatch to a specific agent; the agent multi-homes or the owning orchestrator proxies. More private and more resilient (no central party sees everything) but materially more complex to build and debug.
+
+> **Recommendation:** ship Pattern A. Design the data model and tokens so **Pattern B is reachable as an additive change** — agents already speak "outbound to an orchestrator"; multi-homing adds a second connection, not a rewrite. Mitigate Pattern A's central-trust risk with **E2E payload encryption to the target agent's public key** (§8.4) so the orchestrator can relay tasks it cannot read.
 
 ---
 
 ## 6. Component Breakdown — Manager Console
 
-**Tech:** Tauri v2 + Svelte 5 + Tailwind (+ a small headless component layer). One codebase, native desktop feel, small bundle — consistent with SteloPTC and RadioDoge. The Console may **embed Gruper core's conversation UI** as the per-agent "talk to this worker" view, reusing existing, debugged UX rather than rebuilding it.
+**Tech stack:** Tauri v2 + Svelte 5 + Tailwind, consistent with SteloPTC. One codebase, native desktop feel, small binary. The console is the human operator's single pane of glass for the entire fleet.
+
+**Gruper core integration — the key design choice:** the console **embeds Gruper core's conversation UI** as the per-agent interaction view. When you open an agent's detail panel and want to direct a reasoning session, you are looking at Gruper's conversation engine — the same round-based multi-agent loop, the same glassmorphism UI, the same keyboard shortcuts (`Ctrl+Enter` to dispatch, `Ctrl+A` for analytics) that core users already know. The console's fleet management, task composer, and sharing panel wrap around this embedded core; they do not replace it. Gruper core's Chart.js analytics dashboard is similarly embedded for per-agent and per-fleet performance views.
 
 ### 6.1 Key screens
 
-| Screen | Purpose |
-|--------|---------|
-| **Fleet Overview** | Grid/list of all visible agents (owned + shared). Status, location tag, load, last-seen, ownership badge. Optional map view from `location_tag`. |
-| **Agent Detail & Control** | Specs, current task, **live log stream**, history, "Assign New Task," and (for owned agents) "Manage Sharing." |
-| **Task Composer** | Natural-language → structured task (AI-assisted parse) *or* form (prompt, input files, allowed tools, timeout, target = specific agent or "best match," priority, data class). |
-| **Crew / Workflow Builder** | Graph where one agent's output feeds another — possibly on different machines/owners. Visual canvas + YAML/JSON import. |
-| **Sharing Panel** | Generate/revoke tokens; see who can access your agents; set per-recipient scope (task types, quotas, time windows, approval requirements, data class). |
-| **Monitoring & Analytics** | Success rate, latency by agent/location, AWS cost, utilization heatmaps, queue depth. Reuses Gruper core's Chart.js analytics patterns. |
-| **AI Co-Pilot Mode** | Optional meta-agent suggests/auto-dispatches routine work per your policies. |
+| Screen | Core integration | Purpose |
+|--------|-----------------|---------|
+| **Fleet Overview** | Reuses core's agent status concepts | Grid/list of all visible agents (owned + shared). Status badges, location tags, load, last-seen, ownership indicator. Optional map from `location_tag`. |
+| **Agent Detail & Control** | **Embeds Gruper core conversation UI** for direct agent interaction | Specs, current task, live log stream, history, "Assign New Task," and (for owned agents) "Manage Sharing." The conversation pane is Gruper core. |
+| **Task Composer** | Builds on core's task-input patterns | Natural language → structured task (AI-assisted) or form-based (prompt, input files, allowed tools, timeout, target agent or "best match," priority, data class). |
+| **Crew / Workflow Builder** | Extends core's multi-agent round model to cross-machine | Visual graph: one agent's output feeds another, potentially on a different owner's machine. YAML/JSON import/export. |
+| **Sharing Panel** | New in Distributed | Generate/revoke tokens; see who can access your agents; set per-recipient scope (task types, quotas, time windows, approval requirements, data class, jurisdiction). |
+| **Monitoring & Analytics** | **Extends Gruper core's Chart.js dashboard** | Success rate, latency by agent/location, cloud cost, utilization heatmaps, queue depth. Same visual language and export formats (CSV/JSON) as core. |
+| **AI Co-Pilot Mode** | Extends core's consensus/meta-reasoning | Optional meta-agent suggests assignments or auto-dispatches routine work per configured policies. |
 
-### 6.2 Mobile / on-the-go
-A later **read-only PWA or Tauri-mobile** view for fleet status and urgent approval taps — explicitly tuned for the "approve while driving Uber" reality. Out of scope for the first release; the data model should not preclude it.
+### 6.2 Mobile / on-the-go (post-v1 target)
+
+A read-only PWA or Tauri-mobile view for fleet status and urgent approval taps — explicitly designed for "check fleet while between tasks" scenarios. Out of scope for the first release; the API and data model must not preclude it.
 
 ---
 
 ## 7. Component Breakdown — Communication & Cloud Integration
 
-### 7.1 Communication layer (hybrid LAN + internet)
+### 7.1 Communication layer
 
-| Mode | Mechanism | When |
+| Mode | Mechanism | Role |
 |------|-----------|------|
-| **Internet / remote (always works)** | Agent dials **outbound WSS** to orchestrator on startup; maintains it with auto-reconnect, exponential backoff (mirrors Gruper core's 2/4/8/16 s pattern), offline queue; heartbeats keep NAT alive | **The default and the cross-network workhorse.** No inbound rules ever. |
-| **LAN (zero-config, optional)** | mDNS/Bonjour discovery; direct WSS/QUIC for lowest latency | Local clusters in one home/office; speed optimization, not required |
-| **Direct P2P (later)** | Orchestrator brokers ICE (STUN, optional TURN); WebRTC DataChannel / QUIC between agents after introduction; **falls back to relay** | Large artifacts, agent-to-agent handoff. Post-MVP. |
+| **Internet relay (always works)** | Agent dials outbound WSS to orchestrator on startup; maintains it with auto-reconnect and exponential backoff (mirroring Gruper core's 2 s / 4 s / 8 s / 16 s retry pattern); offline queue; heartbeats keep NAT mappings alive | **The default and the cross-network workhorse.** No inbound rules ever required. |
+| **LAN direct (optional, zero-config)** | mDNS/Bonjour discovery; direct WSS/QUIC for lowest latency | Local clusters in one home or office; speed optimization, not required for correctness |
+| **Direct P2P (post-MVP)** | Orchestrator brokers ICE (STUN + optional TURN relay); WebRTC DataChannel or QUIC direct after introduction; **falls back to relay automatically** | Large artifact transfers, agent-to-agent handoff at high bandwidth. Not needed until the relay path is solid. |
 
-**Auth & encryption:** every connection authenticated (signed registration / short-lived token); TLS 1.3 everywhere; sensitive payloads optionally encrypted client-side to the **target agent's public key** for true E2E even on a shared orchestrator.
+**Authentication and encryption:** every connection is authenticated (signed registration + short-lived token); TLS 1.3 on all channels; sensitive task payloads encrypted client-side to the **target agent's public key** for true end-to-end confidentiality even when routed through a shared orchestrator (§8.4).
 
 ### 7.2 AWS / cloud integration
 
-- Pre-built multi-arch Docker image (CPU + CUDA) with the agent runtime and optional bundled Ollama.
-- Launch templates / Terraform for common types (`t3` light, `g4dn`/`g5` GPU; **spot by default**).
-- On boot: read `ORCHESTRATOR_URL`, `REGISTRATION_TOKEN`, `AGENT_TAGS`, `ROLE` → auto-register → appear in fleet.
-- **Cost controls (first-class, not afterthought):** idle-timeout auto-terminate; orchestrator "drain & stop" signal; hard per-pool budget caps with alerts; queue-depth-driven scaling via a small Lambda or scheduler.
-- Portability: the same container runs on Hetzner, RunPod, or Vast.ai (cheap GPU) — one abstraction, many backends.
+- Pre-built multi-arch Docker image (CPU + CUDA variants) with the agent runtime and optional bundled Ollama.
+- Launch templates and Terraform for common instance types (`t3` for light CPU work; `g4dn` / `g5` for GPU inference; **spot instances by default** for cost control).
+- Boot sequence: read `ORCHESTRATOR_URL`, `REGISTRATION_TOKEN`, `AGENT_TAGS`, `ROLE` from environment or mounted secret → auto-register → appear in fleet.
+- **Cost controls are first-class, not afterthought:** idle-timeout auto-terminate; orchestrator "drain and stop" signal; hard per-pool budget caps with alerts before launch; queue-depth-driven scaling via Lambda or a scheduler. Spend cannot exceed the configured cap.
+- Portability: the same container image runs on Hetzner, RunPod, or Vast.ai — one abstraction, multiple cloud backends.
 
-### 7.3 Tool & integration ecosystem
+### 7.3 Tool and integration ecosystem
 
-Agents expose an OpenAI-function-calling-compatible tool interface for portability.
+Agents expose an OpenAI-function-calling-compatible tool interface. Tools are the extension points; they are not the agent loop.
 
 | Tool | Notes |
 |------|-------|
-| `code_interpreter` | Sandboxed Python/JS, approved libs only |
-| `web_search` | Tavily / self-hosted SearxNG / Brave; privacy toggle |
-| `file_system` | Scoped read/write in task workspace or approved dirs |
-| `n8n_webhook` / `http_request` | Trigger existing n8n workflows or any API |
-| `email_send` / `slack_post` | Approval-gated, scoped creds |
-| `vector_store` | Local LanceDB/Chroma per agent, or shared read-only KB |
-| `radio_doge_send` | Optional bridge to LoRa mesh for resilient coordination (future) |
+| `code_interpreter` | Sandboxed Python / JS; approved libraries only; memory + time limits |
+| `web_search` | Tavily / self-hosted SearxNG / Brave; privacy toggle per task |
+| `file_system` | Scoped read/write in task workspace or explicitly approved directories |
+| `n8n_webhook` / `http_request` | Trigger existing n8n workflows or any HTTP API; bidirectional |
+| `email_send` / `slack_post` | Approval-gated; scoped credentials per agent |
+| `vector_store` | Local LanceDB or Chroma per agent; optional shared read-only knowledge base |
 
-**n8n synergy:** agents become powerful "reasoning nodes" inside n8n workflows, and entire crews can be triggered from n8n; conversely n8n handles deterministic automation while agents handle reasoning/research. **RadioDoge bridge:** LoRa mesh carries tiny task/sync messages when the internet is down (UC-5).
+**n8n synergy:** agents become powerful reasoning nodes inside n8n workflows, and entire agent crews can be triggered from n8n. Conversely, n8n handles deterministic automation while agents handle reasoning, research, and unstructured work. Neither replaces the other.
 
 ---
 
 ## 8. Security, Privacy & Trust Model
 
-This is the most important section for the cross-user requirement. The whole point is that you can hand someone a *scoped, revocable* worker — not root on your machine.
+This section is the load-bearing wall of the cross-user design. The whole point is that you can hand a collaborator a *scoped, revocable* AI worker — not root access to your machine. Getting this wrong means the product is either unsafe to share or too paranoid to be useful.
 
-### 8.1 Identity & ownership
-- Each user has a root identity: an **ed25519 keypair** (optionally OAuth-backed for recovery/UX).
-- Each agent is **cryptographically bound to its owner** at registration.
-- **Share tokens** are signed capability tokens (JWT or biscuit-style) encoding: target `agent_id`(s), grantee `user_id`, allowed actions, quotas, expiry, and conditions. They are presented on every dispatch and verified by the orchestrator.
+### 8.1 Identity and ownership
 
-### 8.2 Sharing & permissioning (the core of cross-user)
-- **Owner is sovereign:** can view every task ever run on their agent, and **revoke instantly** — the orchestrator stops dispatching and signals the agent to drop/abort.
-- **Granular scopes (examples):**
+- Each user has a root identity: an **ed25519 keypair** (optionally OAuth-backed for recovery and onboarding UX).
+- Each agent is **cryptographically bound to its creating owner** at registration — the owner's private key signs the registration, and the orchestrator records the public key as the agent's identity anchor.
+- **Share tokens** are signed capability tokens (JWT or biscuit-style) encoding: target `agent_id`(s), grantee `user_id`, allowed action scopes, quotas, expiry, and conditions. They are presented on every dispatch and verified by the orchestrator before any task is queued.
 
-| Scope dimension | Example |
-|-----------------|---------|
-| Task categories | `["research","analysis","writing"]` — *not* `execute_arbitrary` or `email_external` |
-| Resource limits | max 2 concurrent, ≤ 16 GB/task, ≤ 2 h runtime |
-| Time windows | weekdays 09:00–18:00 owner-local only |
-| Data classification | only tasks tagged `public` or `internal` |
-| Result visibility | grantee sees final output, **not** intermediate logs/tool calls |
-| Jurisdiction | grantee may not route `confidential` here if owner is non-US |
+### 8.2 Sharing and permissioning
 
-- The grantee's console shows shared agents with a **clear "shared / limited" indicator** and only the actions their token permits.
+**Owner sovereignty:** the owner can view every task ever run on their agent and **revoke any grant instantly** — the orchestrator stops dispatching immediately and signals the agent to drop or abort the current task. There is no grace period.
 
-### 8.3 Sandbox & containment
-Every task runs isolated with: separate FS namespace/tmpfs; dropped capabilities; seccomp/AppArmor/SELinux (desktop) or container defaults (cloud); a network egress allow-list (possibly empty); and cgroup-enforced CPU/memory/wall-time limits. **No task can touch another task's state or the host except through explicitly provided tools.**
+**Granular scope examples:**
 
-### 8.4 Data protection
-- Tasks tagged `confidential` route **only** to agents whose owner/jurisdiction/posture satisfy policy ("US only," "on-prem only," "encrypted at rest").
-- With **E2E payload encryption to the target agent's public key**, a shared/central orchestrator relays content it cannot read — directly mitigating Pattern A's central-trust risk.
-- Audit log records *who assigned what to which agent and the high-level outcome*; sensitive content is redacted or hashed.
+| Scope dimension | Example value |
+|-----------------|--------------|
+| Task categories | `["research","analysis","writing"]` — explicitly excludes `execute_arbitrary`, `email_external` |
+| Resource limits | max 2 concurrent tasks; ≤ 16 GB RAM per task; ≤ 2 h wall time |
+| Time windows | weekdays 09:00–18:00 owner-local time only |
+| Data classification | only tasks tagged `public` or `internal`; never `confidential` |
+| Result visibility | grantee receives final output; intermediate logs and tool call details are not exposed |
+| Jurisdiction | tasks tagged `confidential` may not be dispatched to non-US agents under this grant |
 
-### 8.5 Threat model & mitigations
+The grantee's console shows shared agents with a clear "shared / limited" indicator. Actions not covered by the token are not surfaced in the UI.
+
+### 8.3 Sandbox and containment — parity is non-negotiable
+
+**Every task on every agent type runs isolated:**
+
+- Separate filesystem namespace / tmpfs per task.
+- Dropped Linux capabilities.
+- seccomp / AppArmor / SELinux profiles on desktop; container runtime defaults on cloud.
+- Network egress allow-list (can be empty for fully offline agents; required to be restrictive for agents running regulated data).
+- cgroup-enforced CPU, memory, and wall-time limits.
+
+**Sandbox parity across desktop and container is an explicit engineering requirement, not a nice-to-have.** Cross-user sharing means a weak desktop sandbox on a collaborator's machine is a risk for the entire fleet — not just their own tasks. Container sandboxing is well-understood; desktop sandboxing (Firejail on Linux, WinSandbox on Windows, App Sandbox on macOS) requires explicit, tested configuration per platform. This is addressed in the `gd-0.5` security milestone with a mandatory cross-platform sandbox validation pass. **Releasing cross-user sharing with unvalidated desktop sandboxing is not acceptable.**
+
+No task can affect another task's state or the host OS except through explicitly provisioned tools.
+
+### 8.4 Data protection and end-to-end encryption
+
+**Data-class routing:** tasks tagged `confidential` route only to agents whose owner, jurisdiction, and posture satisfy policy ("US only," "on-prem only," "encrypted at rest required"). This is enforced by the orchestrator at dispatch time, not as a best-effort suggestion.
+
+**E2E payload encryption:** with Pattern A (shared orchestrator), the orchestrator sees task metadata but need not see task content. When the submitter encrypts the task payload to the **target agent's ed25519-derived public key** (X25519 key agreement + ChaCha20-Poly1305), the orchestrator relays ciphertext it cannot read. This is the primary mitigation for Pattern A's central-trust risk and is a **first-class feature of the `gd-0.5` hardening milestone** — not an optional add-on.
+
+For pharma and biotech users processing regulated or patient-adjacent data, E2E encryption combined with on-prem-only routing and the hash-chained audit log is the minimal viable compliance posture. Observatory and astronomy users typically have lower sensitivity requirements but benefit from audit trails for reproducibility.
+
+**Audit log:** records who assigned what to which agent, when, with what scope, and the high-level outcome. Sensitive payload content is redacted or hashed. The log is append-only and hash-chained (each event includes the hash of the previous) for tamper-evidence — this is the compliance record for LLC recordkeeping and any regulated-industry audit.
+
+### 8.5 Threat model and mitigations
 
 | Threat | Mitigation |
 |--------|------------|
-| Malicious **shared agent** owner inspects your task | E2E payload encryption; never send confidential tasks to lower-trust agents; data-class routing |
-| Malicious **grantee** abuses your agent | Per-grantee quotas, scopes, time windows; instant revoke; full audit |
-| **Compromised orchestrator** | Agents execute only authorized, signed dispatches; E2E encryption protects content; LAN/local fallback mode |
-| **Resource exhaustion** by shared users | Per-grantee + global caps; cgroup limits; queue fairness |
-| **Supply chain** | Minimal base images, reproducible builds, SBOM, pinned deps (mirrors Gruper core's SRI-hash discipline) |
-| **Rogue manager agent** over-delegates | Manager agents inherit a *subset* of the human's scopes; cannot exceed granted authority; their dispatches are audited like any other |
+| Malicious shared-agent owner reads your task content | E2E payload encryption to target agent key; data-class routing prevents confidential tasks from reaching lower-trust agents |
+| Grantee abuses your agent (resource theft, scope escalation) | Per-grantee quotas, scoped tokens, time windows; instant revoke; full audit log; cgroup hard limits prevent resource exhaustion |
+| Compromised orchestrator (Pattern A risk) | Agents execute only signed, authorized dispatches; E2E encryption protects content even if orchestrator is read; local/LAN-direct mode as fallback |
+| Weak desktop sandbox on a collaborator's machine | Mandatory cross-platform sandbox validation before cross-user sharing ships (`gd-0.5` gate); desktop agents default to the most restrictive available profile |
+| Rogue manager agent over-delegates | Manager agents inherit a *strict subset* of their human principal's scopes; they cannot exceed the authority they were granted; all their dispatches are audited like any human dispatch |
+| Supply chain / dependency attacks | Minimal base images; reproducible builds; SBOM; pinned dependencies with SRI-style hash verification (mirrors Gruper core's CDN SRI discipline applied to container layer hashes) |
+| AWS cost overrun | Hard budget caps enforced before instance launch; spot-by-default; idle auto-terminate; orchestrator drain-and-stop signal |
 
 ---
 
-## 9. Data Models (concise)
+## 9. Data Models
 
-**User / Identity** — `id, pubkey, display_name, recovery (optional OAuth), created_at`
+**User / Identity**
+`id, pubkey (ed25519), display_name, org_id (optional), recovery_method (optional OAuth), created_at`
 
-**Agent** — `id, owner_id, pubkey, name, location_tag, jurisdiction, capabilities (JSONB), availability (JSONB), share_policies (JSONB[]), status, runtime_version, last_seen, created_at, metadata`
+**Agent**
+`id, owner_id, pubkey, name, location_tag, jurisdiction, capabilities (JSONB), availability (JSONB), share_policies (JSONB[]), status, runtime_version, last_seen, created_at, metadata (JSONB)`
 
-**Task** — `id, correlation_id, submitter_id (user|agent), assigned_agent_id, parent_task_id (hierarchy), data_class, input (JSON | encrypted blob), allowed_tools, status, priority, deadline, created_at, dispatched_at, completed_at, result (JSON|ref), logs_ref, cost_cents, audit_hash`
+**Task**
+`id, correlation_id, submitter_id (user|agent), assigned_agent_id, parent_task_id, data_class, input (JSON | encrypted blob), allowed_tools, status, priority, deadline, created_at, dispatched_at, completed_at, result (JSON|ref), logs_ref, cost_cents, audit_hash`
 
-**ShareToken / Grant** — `id, agent_id(s), grantee_user_id, scopes[], quotas (JSON), conditions (JSON: time_windows, jurisdiction, data_class), expires_at, revoked_at, created_by`
+**ShareToken / Grant**
+`id, agent_id[] (one or more), grantee_user_id, scopes[], quotas (JSON), conditions (JSON: time_windows, allowed_data_classes, jurisdiction_require), expires_at, revoked_at, created_by`
 
-**Event (audit)** — `id, ts, actor_id, action, subject_id, payload_hash, prev_hash` — **append-only, hash-chained** for tamper-evidence (LLC/compliance need).
+**Event (audit — append-only)**
+`id, ts, actor_id, action, subject_id, payload_hash, prev_hash`
+Hash-chaining (`prev_hash` references the hash of the prior event) provides tamper-evidence without a blockchain. This is the compliance record for LLC bookkeeping, pharma audit trails, and observatory run logs.
 
-> Storage: PostgreSQL + JSONB centrally; SQLite per agent for its local queue/offline buffer. Artifact bytes go to object storage or are returned by reference (presigned URL / local HTTP), **not** inlined past a size threshold — see Open Question OQ-4.
+**Storage:** PostgreSQL + JSONB centrally for query power; SQLite per agent for its local queue and offline buffer. Artifact bytes go to object storage or are returned by reference (presigned URL / local HTTP server), not inlined past a configurable size threshold — see OQ-4.
 
 ---
 
 ## 10. Technology Recommendations & Rationale
 
-| Component | Recommendation | Why (aligned to the user's stack & constraints) |
-|-----------|----------------|------------------------------------------------|
-| Desktop UI / installer | **Tauri v2 + Svelte 5 + Tailwind** | Existing expertise (SteloPTC, RadioDoge); native feel, small bundle, Rust backend available |
-| Console ↔ agent conversation view | **Embed/adapt Gruper core UI** | Reuse debugged multi-agent conversation + analytics UX instead of rebuilding |
-| Agent runtime core | **Python agent loop first; Rust for sandbox/comms hardening later (PyO3 or port)** | Python = fastest agent-framework iteration; Rust where security/perf matter — the user's stated prototype→harden pattern |
-| Orchestrator | **FastAPI + PostgreSQL first; Rust (axum/tonic) port of hot paths later** | Quickest working cross-network demo; harden under load/audit |
-| LLM inference | **Ollama-first**, cloud fallback optional | Privacy, cost, offline; the user's current setup |
-| Workflow | **n8n (existing) + native agent graphs** | Don't rebuild working automation; agents become nodes |
-| Containers | **Docker, multi-arch (CPU + CUDA)** | AWS/VPS/desktop-sandbox consistency; cloud portability |
-| LAN discovery | **mDNS** | Zero-config local clusters |
-| Transport | **WSS now; gRPC + WebRTC/QUIC later** | Reliable relay first, direct P2P as optimization |
-| Identity / auth | **ed25519 + signed capability tokens** | Strong, federation-friendly, owner-sovereign |
-| Storage | **Central PostgreSQL + per-agent SQLite** | Query power centrally; privacy + offline buffer at the edge |
+| Component | Recommendation | Why |
+|-----------|----------------|-----|
+| Desktop UI / installer | **Tauri v2 + Svelte 5 + Tailwind** | Existing expertise (SteloPTC); native feel, small binary, Rust backend available when needed |
+| Agent conversation view in console | **Embed Gruper core's conversation UI** | Reuse six months of debugged multi-agent UX, analytics, and keyboard shortcuts rather than rebuilding |
+| Agent runtime core | **Python agent loop first; Rust (PyO3 bridge or port) for sandbox and comms hardening** | Python = fastest agent-framework iteration; Rust where memory safety matters — prototype-then-harden |
+| Orchestrator | **FastAPI + PostgreSQL first; Rust (axum/tonic) port of registry and dispatch hot paths** | Quickest working cross-network demo; harden incrementally under load and security review |
+| LLM inference | **Ollama-first** (same local endpoint as Gruper core); cloud fallback optional and explicit | Privacy, cost control, offline capable; consistent with existing stack |
+| Workflow automation | **n8n (existing) + native agent graphs** | Don't rebuild working automation; agents become powerful reasoning nodes inside existing n8n flows |
+| Containerization | **Docker, multi-arch (linux/amd64 + linux/arm64; CPU + CUDA variants)** | AWS, VPS, desktop sandbox, and NUC/Beelink consistency |
+| LAN discovery | **mDNS (Bonjour / Avahi)** | Zero-config local clusters; no configuration required |
+| Transport | **WSS now; gRPC and WebRTC/QUIC as later optimizations** | Reliable universal relay first; direct P2P only after relay path is proven |
+| Identity / auth | **ed25519 keypairs + signed capability tokens (JWT or biscuit)** | Strong identity, federation-friendly, owner-sovereign, no third-party auth dependency |
+| Storage | **Central PostgreSQL + per-agent SQLite** | Query power and JSONB flexibility centrally; privacy and offline buffering at the edge |
 
-**Phased tech posture:** prototype in Python to reach a working **Houston → San Diego** demo fast; port hot/security-critical paths to Rust; add direct P2P and federation only once the relay path is solid.
+**Phased tech posture:** prototype the full cross-network path in Python to reach a working Houston → San Diego demo as fast as possible. Port security-critical and high-throughput components to Rust once the relay model is validated. Add direct P2P, federation, and gRPC only after the WSS relay path is solid in production.
 
 ---
 
-## 11. Phased Implementation Roadmap (toward a *future* v1.0)
+## 11. Phased Implementation Roadmap (toward a future v1.0)
 
-**Framing:** This roadmap is a path to a *first stable release.* Each milestone is a pre-release tag (`gd-0.x`) with an explicit exit gate. **v1.0 is declared only when the Success Criteria (§1.4) hold for real users** — at which point this roadmap is rewritten to mark that we have reached v1. We are at the very start: **`gd-0.0`, design.**
+**Framing:** This roadmap is a path to a first stable release. Each milestone is a pre-release tag (`gd-0.x`) with an explicit exit gate. **v1.0 is declared only when the Success Criteria (§1.4) hold for real users** — at which point this roadmap is rewritten to record that we have reached v1. We are currently at `gd-0.0`: design.
 
 ```mermaid
 flowchart LR
-    D0["gd-0.1\nFoundations"] --> D1["gd-0.2\nWalking skeleton\n(1 owner, LAN→internet)"]
-    D1 --> D2["gd-0.3\nCross-network + sharing\n(Houston↔San Diego)"]
-    D2 --> D3["gd-0.4\nAWS burst + cost caps"]
-    D3 --> D4["gd-0.5\nSecurity hardening\n+ sandbox + audit"]
-    D4 --> D5["gd-0.6–0.9\nConsole polish · crews · beta"]
-    D5 --> V1["v1.0\nFirst stable release\n(SC-1…SC-7 met)"]
-    V1 --> P["gd-1.x\nFederation · P2P · mobile"]
+    G0["gd-0.1\nFoundations\n(schemas · contracts)"]
+    G1["gd-0.2\nWalking skeleton\n(1 owner · relay works)"]
+    G2["gd-0.3\nCross-network + sharing\n(Houston↔San Diego)"]
+    G3["gd-0.4\nAWS burst\n+ cost controls"]
+    G4["gd-0.5\nSecurity hardening\n+ sandbox parity\n+ E2E encryption"]
+    G5["gd-0.6–0.9\nConsole polish\n· crews · beta"]
+    V1["v1.0\nFirst stable release\n(SC-1…SC-7 met)"]
+    P1["gd-1.x\nFederation · P2P\n· mobile · ecosystem"]
+
+    G0 --> G1 --> G2 --> G3 --> G4 --> G5 --> V1 --> P1
 ```
 
-### `gd-0.1` — Foundations *(design + contracts)*
-- Finalize this spec, data models, and **wire contracts** (OpenAPI for the console API; the agent↔orchestrator WSS message schema).
-- Stand up a skeleton FastAPI orchestrator + PostgreSQL via Docker Compose.
-- Decide the MVP agent-loop framework (OQ-1) and lock the task/state schema so it can swap later.
-- **Exit gate:** schemas reviewed; an agent can *register* and heartbeat; nothing dispatched yet.
+---
 
-### `gd-0.2` — Walking skeleton *(single owner)*
-- One agent (desktop) dials out, registers, receives an explicitly-assigned task, runs it against local Ollama, streams a result back. Minimal Tauri console showing one agent + one task.
-- Offline queue stub + reconnect with backoff.
-- **Exit gate:** end-to-end task on *your own* machine over the internet path (not just LAN). This proves the outbound-relay model.
+### `gd-0.1` — Foundations *(design and contracts)*
 
-### `gd-0.3` — Cross-network + sharing *(the headline)*
-- **Pattern A** multi-tenant orchestrator: owners, agents-under-owners, **scoped share tokens**, token import in the console.
-- A second person's machine (San Diego) appears in your fleet and executes a task you assign. **Instant revoke** works.
-- QR/token onboarding UX for non-technical collaborators.
-- **Exit gate:** **UC-1 works for real** (Houston → San Diego), SC-1/SC-3/SC-5 demonstrably met for the happy path.
+**Goal:** lock the interfaces everything else is built against.
+
+- Finalize this spec, data models, and **wire contracts**: OpenAPI schema for the console REST/WS API; the agent↔orchestrator WSS message schema (register, heartbeat, task-push, progress-stream, result, revoke).
+- Map Gruper core's agent configuration schema (model, temperature, top-p, top-k, repeat penalty, max tokens, context length, role template) to the distributed task input schema — this is the bridge between core's local parameter model and the remote execution contract.
+- Stand up a skeleton FastAPI orchestrator + PostgreSQL via Docker Compose: one endpoint (`/register`), one WebSocket handler (`/agent/ws`), basic JWT issuance.
+- Decide OQ-1 (agent-loop framework) so the task/state schema can be frozen.
+
+**Exit gate:** schemas reviewed and agreed; an agent can register and heartbeat; no tasks dispatched yet.
+
+---
+
+### `gd-0.2` — Walking skeleton *(single owner, relay proven)*
+
+**Goal:** prove the outbound-relay model works end-to-end over the public internet.
+
+- One desktop agent dials out, registers, receives an explicitly-assigned task via the WSS push, runs it against the **local Ollama endpoint using Gruper core's existing API integration pattern** (same `/api/generate` or `/api/chat` call shape, same parameter passing), and streams the result back.
+- Minimal Tauri console (Svelte 5): one agent card, one task form, one result view. The task result view is **Gruper core's conversation message rendering**, embedded directly — not reimplemented.
+- Offline queue stub: tasks queued locally when the orchestrator is unreachable, drained on reconnect with exponential backoff.
+- Per-agent analytics tab in the console begins as **Gruper core's Chart.js response-time chart** scoped to that agent's task history.
+
+**Exit gate:** end-to-end task on your *own* machine over the internet relay path (not just LAN direct). This proves SC-5 for the single-owner case and validates the core relay model before sharing is added.
+
+---
+
+### `gd-0.3` — Cross-network + sharing *(the headline milestone)*
+
+**Goal:** UC-1 (Houston → San Diego) works for real.
+
+- Pattern A multi-tenant orchestrator: user namespaces, agents-under-owners, **scoped share token minting and import**.
+- Token import UX in the console: paste a token string or scan a QR code → the shared agent appears in your fleet with its granted scope and a clear "shared / limited" badge.
+- A second person's machine (the San Diego collaborator) installs the desktop agent, receives a share token, and executes a task assigned from Houston. **Instant revoke works and is tested.**
+- The task flow runs against **the remote agent's local Ollama**, using the same model parameter schema from `gd-0.1` — the submitter specifies model preferences; the agent uses what it has that best matches.
+- Manager-agent delegation: a meta-agent can dispatch sub-tasks using a *subset* of the human principal's scope. The console shows the delegation chain.
+
+**Exit gate:** UC-1 works with a real second person on a real second machine over the public internet. SC-1, SC-3, and SC-5 are demonstrably met for the happy path. The sharing panel allows token generation, scoping, and revocation with no command-line steps.
+
+---
 
 ### `gd-0.4` — AWS burst + cost control
-- Multi-arch Docker image (CPU + CUDA); Terraform/spot launch with auto-register; idle auto-terminate; **hard budget caps + alerts**; queue-depth scaling.
-- **Exit gate:** UC-2 works; spend cannot exceed the configured cap.
+
+**Goal:** UC-2 (cloud burst) works with hard spending guarantees.
+
+- Multi-arch Docker image published (`CPU + CUDA`); Terraform module for spot fleet launch.
+- Boot sequence: env vars → auto-register → appear in fleet; idle auto-terminate; orchestrator "drain and stop" signal.
+- **Hard budget caps enforced before first instance launch** — the orchestrator refuses to dispatch to a pool if its cost cap would be breached. Alerts on threshold approach.
+- Queue-depth-driven scale-out hook (Lambda or simple scheduler polling the orchestrator's queue API).
+- Per-agent cost tracking in the analytics dashboard (extends Gruper core's analytics with a cost dimension for cloud agents).
+
+**Exit gate:** UC-2 works; spend cannot exceed the configured cap under any queue-depth scenario tested.
+
+---
 
 ### `gd-0.5` — Security hardening
-- Per-task sandbox (Docker/Firejail desktop; container isolation cloud); egress allow-lists; cgroup limits; approval gates.
-- Hash-chained audit log; per-grantee quotas; data-class routing; **optional E2E payload encryption**.
-- First **security review** pass (use the repo's `/security-review` discipline).
-- **Exit gate:** SC-4/SC-6 met; a written threat-model review signed off.
 
-### `gd-0.6–0.9` — Console polish, crews, beta
-- Capability/policy auto-dispatch (alongside explicit assign); fleet map; live logs; **crew/workflow builder**; monitoring/analytics; manager-agent delegation with scope inheritance; bidirectional n8n.
-- Small **closed beta** with 2–3 trusted collaborators across locations.
-- **Exit gate:** all SC met for beta users; docs (install, sharing, ops) complete.
+**Goal:** cross-user sharing is safe enough for real sensitive workloads.
 
-### **v1.0 — first stable release**
-Declared when `gd-0.9` exit holds for real users. Rewrite the roadmap to state we have reached v1. *This is the only place "v1" legitimately appears as present tense.*
+- **Per-task sandboxing across all platforms:** Firejail (Linux desktop), WinSandbox / Windows Job Objects (Windows), App Sandbox (macOS), container defaults (cloud). Mandatory cross-platform validation. Desktop and container sandboxes must be demonstrably equivalent in containment — this is the exit gate condition, not a best-effort aspiration.
+- Egress allow-lists per role and per grant; cgroup limits enforced in all environments; approval gates for high-impact tool calls.
+- **E2E payload encryption:** submitter encrypts task payload to target agent's public key (X25519 + ChaCha20-Poly1305) before the orchestrator sees it. Orchestrator routes ciphertext. Agent decrypts in the sandbox.
+- Hash-chained audit log fully implemented and queryable from the console.
+- Per-grantee quotas enforced; data-class routing with jurisdiction enforcement.
+- First formal **security review pass** of the codebase (using the repository's `/security-review` discipline).
+- SRI-equivalent integrity pinning for Docker image layers in the Terraform module (mirrors Gruper core's CDN SRI-hash validation in CI).
 
-### `gd-1.x` (post-v1, later)
-Federation (Pattern B) + agent multi-homing; direct P2P for large artifacts; cross-machine hierarchical crews; predictive AWS pre-warming; mobile companion; opt-in agent directory with reputation. **No blockchain marketplace.**
+**Exit gate:** SC-4 and SC-6 met; written threat-model review signed off; desktop sandbox parity validated on all three platforms; E2E encryption tested against a simulated compromised orchestrator.
+
+---
+
+### `gd-0.6–0.9` — Console polish, crews, and closed beta
+
+**Goal:** the system is good enough to hand to trusted collaborators and get honest feedback.
+
+- Capability-based and policy-based auto-dispatch (alongside explicit assignment).
+- Full fleet map, live log streaming, **crew / workflow builder** (visual graph editor for multi-agent pipelines spanning machines and owners), n8n bidirectional integration.
+- Monitoring and analytics fully extended from Gruper core: per-fleet success rates, latency heat maps, agent utilization, queue depth — same Chart.js visual language and CSV/JSON export as core.
+- **Closed beta with 2–3 trusted collaborators** across real geographic locations and use cases (a lab partner, an astronomy contact, a consulting collaborator).
+- Documentation: install guide, sharing setup, ops runbook, and a security posture summary for collaborators to review before sharing their machine.
+
+**Exit gate:** all seven Success Criteria met for beta users; documentation complete; no critical bugs open.
+
+---
+
+### v1.0 — First stable release
+
+Declared when the `gd-0.9` exit gate holds for real users. The roadmap is rewritten at that point to record that we have reached v1.0. Until then, **this is the only place "v1" appears as a future target** — not a current state.
+
+---
+
+### `gd-1.x` — Post-v1 (later)
+
+Federation (Pattern B) + agent multi-homing; direct P2P channels for large artifacts; cross-machine hierarchical crews with full scope inheritance; predictive AWS instance pre-warming; mobile companion app (PWA / Tauri mobile) for monitoring and approvals; opt-in agent directory with reputation signals.
+
+No public trustless marketplace. No blockchain incentives. Keep the trust model closed-and-invited until there is a strong reason to open it.
 
 ---
 
@@ -522,82 +653,113 @@ Federation (Pattern B) + agent multi-homing; direct P2P for large artifacts; cro
 
 | Risk | Mitigation |
 |------|------------|
-| Sharing abuse / resource theft | Quotas + instant revoke + sandbox limits; start with a small trusted circle |
-| Orchestrator as bottleneck / SPOF | Multi-orchestrator interface early; local fallback; agent-side offline queue |
-| LLM nondeterminism / loop errors | Structured outputs + validation + retry + human gates on critical paths (extends Gruper core's circuit-breaker pattern) |
-| Install friction for non-technical collaborators | One-click installers, sane defaults, QR/token onboarding, limited remote-assist |
-| AWS cost overrun | Spot-by-default, hard caps, per-pool budgets, alerts, idle auto-terminate |
-| **Scope creep into "real distributed systems" complexity** | Ship Pattern A only; defer federation/P2P; relentlessly protect the single-console simplicity that makes Gruper usable |
-| Trust erosion if a collaborator's machine is compromised | E2E encryption, data-class routing, sandbox, audit, revoke; treat shared agents as semi-trusted by default |
+| Sharing abuse / resource theft | Quotas + instant revoke + sandbox hard limits; start with a small trusted circle before any broader rollout |
+| Orchestrator bottleneck or single point of failure | Multi-orchestrator failover interface present early; agent-side offline queue; local/LAN-direct fallback; Pattern B as a post-v1 architecture path |
+| LLM nondeterminism / agent loop errors | Structured outputs + output validation + retry logic + human approval gates on critical paths; extends Gruper core's circuit-breaker discipline to remote task execution |
+| Install friction for non-technical collaborators (pharma staff, lab partners) | One-click installer, QR token scan, sane defaults, no command-line required for basic setup |
+| AWS / cloud cost overrun | Hard caps before launch, spot-by-default, per-pool budgets with alerts, idle auto-terminate, drain-and-stop from orchestrator |
+| **Desktop sandbox weakness in cross-user sharing** | Mandatory sandbox parity validation at `gd-0.5`; cross-user sharing does not ship until desktop sandbox is validated on all three platforms |
+| **E2E encryption deferred too long** | E2E encryption is a `gd-0.5` milestone exit gate, not a "nice to have later" — this is explicitly non-negotiable for real sensitive workloads |
+| Scope creep into "real distributed systems" complexity | Ship Pattern A only; defer federation and P2P; protect the single-console simplicity that makes Gruper usable |
+| Trust erosion if a collaborator's machine is compromised | E2E encryption, data-class routing, sandbox, audit log, instant revoke; treat shared agents as semi-trusted by default in the security model regardless of relationship |
 
-### 12.2 Open Questions (must resolve before/within `gd-0.1`–`0.3`)
+### 12.2 Open Questions (resolve within `gd-0.1` — `gd-0.3`)
 
-- **OQ-1.** MVP agent-loop framework: custom ReAct vs LangGraph vs CrewAt/AutoGen? (Drives the Python/Rust split and the task schema.)
-- **OQ-2.** Sharing model for the first release: confirm **Pattern A** (shared multi-tenant) vs a federated approach. *(Spec recommends A; needs your sign-off because it shapes everything.)*
-- **OQ-3.** Should agents support **multiple simultaneous orchestrator connections** from day one (federation-ready), or single-homed first?
-- **OQ-4.** Artifact/result handling: store centrally (encrypted), return by reference (S3 presigned / local HTTP), or stream-only — and at what size threshold?
-- **OQ-5.** Depth of **n8n integration** in the first release: deep bidirectional, or treat agents as black-box tool callers initially?
+- **OQ-1.** MVP agent-loop framework: custom ReAct implementation (closest to how Gruper core's conversation engine is hand-built) vs LangGraph vs CrewAI/AutoGen? This drives the Python/Rust split and determines whether the task schema is locked around a graph-state model from the start. *Recommendation: custom ReAct first, designed for later graph-engine replacement, consistent with Gruper core's hand-built approach.*
+- **OQ-2.** Confirm **Pattern A** (shared multi-tenant orchestrator) for the first release. This shapes every downstream decision and needs explicit sign-off.
+- **OQ-3.** Should agents support **multiple simultaneous orchestrator connections** from day one (federation-ready multi-homing), or single-homed initially with multi-homing added in `gd-1.x`?
+- **OQ-4.** Artifact / result handling at scale: return by reference (presigned S3 URL or local HTTP), stream only, or store centrally encrypted — and at what byte-size threshold does behavior change?
+- **OQ-5.** Depth of **n8n integration** in the first release: deep bidirectional (agents call n8n workflows; n8n triggers agents), or treat agents as opaque tool-callers initially and add bidirectionality in `gd-0.6+`?
 
 ---
 
 ## 13. Glossary
 
-- **Agent Node** — a machine (PC, laptop, server, EC2) running the agent runtime and participating in one or more fleets.
-- **Orchestrator** — the coordination service holding the registry and dispatching tasks; the relay enabling cross-network assignment.
-- **Manager Console** — the human (or meta-agent) interface for viewing a fleet and submitting work.
-- **Share Token / Grant** — cryptographic, scoped, revocable authorization letting another user see and task one of your agents under defined constraints.
-- **Capability Match** — automatic selection of agents whose hardware/tools/roles/jurisdiction satisfy a task's requirements.
-- **Manager Agent** — an AI agent that decomposes goals and assigns sub-tasks to worker agents, within a subset of its human owner's authority.
-- **Pattern A / Pattern B** — shared multi-tenant orchestrator (first release) vs federated per-user orchestrators (post-v1).
-- **`gd-0.x` / v1.0** — pre-release milestone tags / the future first stable release of Gruper Distributed.
+- **Agent Node** — a machine (PC, laptop, server, EC2 instance) running the Gruper Distributed agent runtime and participating in one or more fleets.
+- **Gruper core** — the stable, single-file, client-only multi-agent conversation system (Gruper.html, v0.4.5). The foundation this project extends.
+- **Orchestrator** — the coordination service holding the agent registry and dispatching tasks; the relay that enables cross-network assignment without inbound ports.
+- **Manager Console** — the Tauri/Svelte desktop application through which a human (or meta-agent) views the fleet and submits work; embeds Gruper core's conversation UI.
+- **Share Token / Grant** — a cryptographically signed, scoped, time-limited, instantly-revocable authorization allowing a grantee to see and task a specific agent under defined constraints.
+- **Capability Match** — automatic selection of agents whose reported hardware, tools, roles, jurisdiction, and availability satisfy a task's requirements.
+- **Manager Agent** — an AI agent that decomposes goals and dispatches sub-tasks to worker agents, operating within a strict subset of its human principal's authority scope.
+- **Data Class** — a label on a task (`public`, `internal`, `confidential`) that constrains which agents may receive it, enforced at dispatch time by the orchestrator.
+- **Pattern A / Pattern B** — shared multi-tenant orchestrator (recommended for the first release) vs federated per-user orchestrators (post-v1 architecture path).
+- **`gd-0.x`** — pre-release milestone tags for Gruper Distributed; all version numbers in this document are on this track until v1.0 is declared.
 
 ---
 
-## 14. Next Steps / Open Questions for Refinement
+## 14. Next Steps for Refinement
 
-1. **Sign off OQ-2 (sharing model).** Everything downstream depends on confirming Pattern A for the first release.
-2. **Pick the agent-loop framework (OQ-1)** so the task/state schema can be frozen in `gd-0.1`.
-3. **Lock the wire contracts** (console API + agent WSS schema) — this is the contract a contractor would build against.
-4. **Confirm the working name** (see reflection) before any public artifacts/installers carry it.
-5. **Scope the closed beta circle** (2–3 trusted collaborators across locations) so `gd-0.3` has real cross-network testers.
+1. **Sign off OQ-2 (sharing model).** Pattern A vs forced-federated is the biggest fork in the road; everything downstream depends on it.
+2. **Decide OQ-1 (agent-loop framework)** so the task and state schema can be frozen in `gd-0.1` and a contractor can build against a stable contract.
+3. **Lock the wire contracts** (console OpenAPI spec + agent WSS message schema). These are the deliverables of `gd-0.1` and the handoff artifact for any external implementation work.
+4. **Confirm the closed beta circle** — 2–3 trusted collaborators across real locations (lab partner, astronomy contact, consulting peer) — so `gd-0.3` has real cross-network testers from the start.
+5. **Confirm the working name** before any public artifacts, installers, or domain registrations use it.
 
-*This specification fully incorporates the requirement that the system is not limited to one's own local network: it enables AWS agents and permissioned assignment of agents on other users' computers (the Houston ↔ San Diego case), forming a practical distributed computing fabric for AI managers and workers — while remaining explicitly **pre-v1** until the first stable release ships.*
+*Gruper Distributed fully incorporates the requirement that the system is not limited to one's own network. It enables AWS agents and permissioned assignment of agents on other users' computers — the Houston ↔ San Diego case, the pharma lab cross-site case, the astronomy observatory remote case — forming a practical, auditable, owner-sovereign distributed computing fabric for AI managers and workers. It remains explicitly pre-v1 until the first stable release ships.*
 
-**End of specification (Design Draft `gd-0.1`).**
+**End of specification — Design Draft `gd-0.2`**
 
 ---
 ---
 
-# Appendix — Reflection (not part of the spec)
+# Appendix — Reflection (not part of the specification)
 
-*Requested commentary, kept separate from the spec body.*
+*Kept separate from the spec body.*
+
+---
 
 ### Most novel / highest-risk parts of the cross-user model
 
-1. **Permissioned cross-owner dispatch with an instant, trustworthy kill switch.** The genuinely novel bit isn't "run an agent on a remote box" — it's that a machine you *don't own* shows up as a first-class, scoped, revocable worker in your console, and the owner stays sovereign the whole time. The risk concentrates in the **share-token semantics and revocation guarantees**: if revoke is even slightly unreliable, or scopes leak (e.g., a manager agent escalating beyond its grant), trust collapses and people stop sharing. This deserves the most careful design and the most tests.
-2. **Confidentiality on a shared/central orchestrator.** Pattern A is the right call for speed, but it means a central party relays everyone's tasks. **E2E payload encryption to the target agent's key** is the load-bearing mitigation; it's the difference between "convenient" and "I'd actually send a client's data through this."
-3. **Sandboxing parity across desktop and cloud.** It's easy to sandbox well in a container and sloppily on a Windows desktop. Cross-user sharing means a *weak* desktop sandbox on a collaborator's machine is everyone's problem. Uniform containment is harder than it looks and is where security debt will hide.
+**1. Permissioned cross-owner dispatch with a trustworthy instant kill switch.**
+The genuinely novel part is not "run an agent on a remote box" — that is table stakes. It is that a machine you *do not own* appears as a first-class, scoped, revocable worker in your console, and the owner remains sovereign the entire time. The risk concentrates in **share-token semantics and revocation guarantees**: if revoke is even slightly unreliable — even by a few seconds or a missed edge case — trust collapses. If scopes leak (for example, a manager agent escalating beyond its granted authority), the sharing model breaks. This deserves the most careful design, the most adversarial testing, and the clearest UX signaling of what each token allows.
+
+**2. Confidentiality on a shared / central orchestrator (Pattern A).**
+Pattern A is the right call for implementation speed, but it means a central party relays everyone's task metadata. E2E payload encryption to the target agent's key is not optional polish — it is the load-bearing mitigation. Without it, "I'd run my client's protocol data through this" is an uncomfortable answer. With it, the orchestrator is a routing layer, not a data store. This is why E2E encryption is a `gd-0.5` exit gate rather than a `gd-1.x` wish.
+
+**3. Desktop sandbox parity.**
+Container sandboxing is well-understood. Desktop sandboxing across Windows, macOS, and Linux is not: it requires explicit, platform-specific configuration, and the failure modes are subtle. Cross-user sharing means a weak sandbox on a collaborator's Windows laptop is a risk for your data. This is where security debt will hide if it is not addressed explicitly and early. The `gd-0.5` mandatory validation gate exists precisely because "we'll fix it later" is how sandbox bypasses end up in production.
+
+---
 
 ### The single decision that determines whether it *feels* like real distributed computing
 
-**The outbound-relay connection model plus sub-10-second, observable dispatch.** If assigning a task to the San Diego box (or an AWS GPU) is one click, shows live progress within seconds, and "just works" through NAT/firewalls with no networking ceremony — it feels like one elastic computer. If it requires port forwarding, VPNs, or feels laggy and opaque, it feels like brittle remote SSH with extra steps. Everything else (frameworks, P2P, federation) is secondary to nailing **"explicit assignment to a remote, untrusting machine that responds fast and shows its work."** Get §3.1 + §3.3 right and the product sings.
+**Sub-10-second, observable dispatch over the outbound relay.**
+
+If assigning a task to the San Diego box or an AWS GPU is one click, shows live progress within seconds, and requires no networking ceremony — it feels like one elastic computer. If it requires VPN setup, port forwarding, or produces a slow opaque "dispatching…" state that eventually times out — it feels like brittle remote SSH with extra steps, and no one will use it for real work.
+
+Everything else in this spec — agent frameworks, P2P, federation, crew builders — is secondary to nailing that experience. The outbound relay model (§3.1 + §3.3) is the correct foundation; the engineering discipline is making the `gd-0.3` milestone feel *fast and transparent*, not just *functional*. Live progress streaming, clear "task dispatched to San Diego (waiting for model)" status, and sub-5-second acknowledgment are the differentiators, not the underlying protocol.
+
+---
 
 ### Naming / positioning
 
-The draft drifted between **"Gruper Distributed"** and **"SteloAgents"** — pick one and be consistent. My recommendation:
+The earlier draft drifted between "Gruper Distributed" and "SteloAgents." That ambiguity is resolved here: **Gruper Distributed** is the working name through the pre-release track. Reasoning:
 
-- **Keep "Gruper Distributed"** as the working name through the pre-release track. It (a) anchors the new system to the credibility and patterns of the thing that already works (Gruper core), (b) signals "this is the distributed *extension*, not a rewrite," and (c) avoids prematurely branding something that hasn't shipped.
-- If you want a distinct product brand later, candidates that read well and aren't overused: **Gruper Grid**, **Gruper Fleet**, **Grupera**, or **Stelo Fleet** (ties to Stelminado/SteloPTC). Avoid "Mesh/Nexus/Distri-" names — they're crowded and vague.
-- Positioning line: *"Gruper, but your agents can live anywhere — your machines, the cloud, or a trusted colleague's computer — under one console you control."*
+- It anchors the extension to Gruper core — the thing that already works and has a track record. New users arrive from core; the name signals continuity.
+- It communicates "distributed extension," not "unrelated new product."
+- It avoids prematurely branding something that has not shipped.
 
-### On the versioning correction (your main note)
+If a distinct product identity is desired at or after v1.0, candidates worth considering: **Gruper Fleet** (clearest; evokes the fleet concept from the spec), **Gruper Grid** (evokes the elastic compute grid), or **Stelo Fleet** (ties to Stelminado and SteloPTC if a unified brand identity is the goal). Avoid names with "Mesh," "Nexus," "Distri-," or "Aether" — they are overused and carry no meaning in a cold introduction.
 
-I removed every "v2" claim. The document now states plainly, up top and in the roadmap, that **we are pre-v1**, defines a `gd-0.x` pre-release track, and makes **v1.0 a future finish line** gated on the Success Criteria holding for real users — explicitly noting that the roadmap gets rewritten to declare v1 only once we've shipped the first stable release. The only present-tense "v1" in the document is the description of *that future moment.*
+Positioning line: *"Gruper, extended. Your agents now live anywhere — your machines, the cloud, or a trusted colleague's computer — all in one console you control."*
+
+---
+
+### On RadioDoge removal
+
+RadioDoge is removed from this specification entirely — from the frontmatter, executive summary, use cases, tool ecosystem, and communication sections. It was a potentially interesting future integration but it was distracting from the core distributed computing story, added a dependency that is firmly out of scope for v1.0, and made the spec feel exploratory rather than actionable. If a LoRa-mesh resilience module is desired in the future, it fits cleanly into the `gd-1.x` ecosystem track and can be added to that section without touching the core architecture.
+
+---
 
 ### Clarifying questions that would materially change the architecture
 
-1. **OQ-2 restated:** Are you fine running (or hosting) a **single shared orchestrator** that all collaborators connect to for the first release, or is "no central party ever sees my tasks" a hard requirement from day one? (Pattern A vs forcing Pattern B early — this is the biggest fork.)
-2. **OQ-1 restated:** Do you want to lean on an existing agent framework (LangGraph/CrewAI/AutoGen) for speed, or keep a thin custom loop you fully control (closer to how Gruper core is hand-built)?
-3. **Inference location for shared agents:** when you task the San Diego machine, should it use **its owner's local Ollama/models** by default, or must the *submitter* be able to pin a specific model the owner may not have? (Affects capability matching and result reproducibility.)
-4. **Confidentiality bar for the first release:** is **E2E payload encryption** a `gd-0.3` blocker (needed before any real sharing), or acceptable to add in `gd-0.5` hardening with trusted-circle-only sharing until then?
-5. **Trust assumption:** is the initial collaborator circle "people I'd give a spare house key" (semi-trusted, optimize for ease) or "vendors/contractors I pay but don't fully trust" (optimize sandbox + audit first)? This sets how aggressive the default sandboxing and data-class defaults should be.
+1. **OQ-2 (sharing model, restated):** Are you comfortable running or hosting a single shared orchestrator that all collaborators connect through for the first release? Or is "no central party ever touches my task metadata" a hard requirement before any real sharing? Pattern A vs forcing Pattern B early is the biggest architectural fork.
+
+2. **OQ-1 (agent loop, restated):** Custom ReAct loop (consistent with Gruper core's hand-built philosophy, maximum control) vs adopting LangGraph or CrewAI (faster framework-provided capabilities, more external dependency)? This decision locks the task/state schema.
+
+3. **Inference for shared agents:** when you task the San Diego machine, does it use the *owner's* installed Ollama models by default (you see what they have; you pick from their capability list), or can the *submitter* pin a specific model that the remote machine may not have (requiring the agent to pull it on demand, with the latency and storage implications that entails)?
+
+4. **E2E encryption timing:** is E2E payload encryption a `gd-0.3` blocker — meaning no real sharing with real data until it exists — or is `gd-0.5` acceptable, with the understanding that `gd-0.3` sharing is explicitly limited to a "trusted-circle, non-sensitive workloads" pilot?
+
+5. **Trust baseline for the initial collaborator circle:** "people I'd give a spare house key" (semi-trusted; optimize for onboarding ease) or "paid contractors I don't fully trust" (optimize for sandbox and audit-first, stricter defaults)? This sets the aggression level for default sandbox profiles, data-class defaults, and whether the first sharing UI emphasizes convenience or explicit confirmation of each scope granted.
