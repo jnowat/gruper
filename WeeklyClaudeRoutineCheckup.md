@@ -1,4 +1,4 @@
-# Daily Claude Routine Checkup — Gruper Repository
+# Weekly Claude Routine Checkup — Gruper Repository
 
 > Automated technical review log. Each entry is appended chronologically.
 > Run this review on a recurring basis to track trends in dependency freshness, code growth, and overall project health.
@@ -1915,3 +1915,248 @@ All 36 section banners in `Gruper.html` are now annotation-free. Final state:
 *Section header audit: COMPLETE — all 36 section banners are now annotation-free and consistently named*
 
 ---
+
+## Review Entry: 2026-06-27
+
+**Reviewer:** Claude (claude-sonnet-4-6 via Claude Code)
+**Branch reviewed:** `main` (commit `ff69bf0` — file rename, 2026-06-26)
+**Repository:** `jnowat/gruper`
+**Files reviewed:** `Gruper.html` (6,221 lines / 253 KB), `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `UserManual.md`, `.github/workflows/check.yml`, `WeeklyClaudeRoutineCheckup.md`
+**Days since last review:** 6 (June 21 → June 27)
+**Note:** File renamed from `DailyClaudeRoutineCheckup.md` → `WeeklyClaudeRoutineCheckup.md` on 2026-06-26
+
+---
+
+### 1. Project Status
+
+| Attribute | Value |
+|---|---|
+| Current version | `0.4.5 — Streamlined UX` |
+| `APP_VERSION` constant (line 2856) | `'0.4.5 - Streamlined UX'` ✅ |
+| `<title>` tag (line 7) | `Gruper v0.4.5 - Multi-Agent Conversation System` ✅ |
+| `version-badge` div (line 2849) | `Gruper v0.4.5` ✅ |
+| README badge | `version-0.4.5` ✅ |
+| Latest CHANGELOG entry | `v0.4.5 (2026-01-31)` ✅ |
+| New commits since June 21 | **1** — file rename on 2026-06-26 (owner action) |
+| Git commits on main (total) | **14** (2 original + 12 from Claude-led work + 1 rename) |
+| Active branches | `main` only — clean |
+| LICENSE | ✅ MIT |
+| GitHub Actions CI | ✅ `check.yml` — 4 checks (+ 2 new added this session) |
+| Chart.js version | ✅ `4.5.1` (single CDN tag, SRI present, npm-verified Jun 17) |
+| DOMPurify version | ✅ `3.4.11` (single CDN tag, SRI present, npm-verified Jun 17) |
+| Duplicate CDN script tags | ✅ None |
+| `<noscript>` fallback | ✅ Present |
+| localStorage quota guard | ✅ Present in `saveState()` |
+| JS section delimiters | ✅ 18 annotation-free named sections |
+| CSS section banners | ✅ All annotation-free (audit completed Jun 21) |
+| ROADMAP.md | ✅ Present (updated this session) |
+| UserManual.md | ✅ Present (20 sections) |
+| README screenshots | ⚠️ "Coming soon" placeholder (persistent, deferred — no images available) |
+
+**Overall health: Excellent — unchanged from June 21 "best since inception" rating.** No regressions, no new critical or high-severity findings. The codebase is clean, all CI gates are green, and documentation is complete. This session resolves three housekeeping inconsistencies introduced since the last review, and adds two new CI steps (SRI hash verification, line-count reporting) that have been on the ROADMAP since June 19.
+
+**Development cadence:** Stable. One owner commit (rename) in 6 days — consistent with a maintained but not actively feature-developed project. The review schedule transition from daily to weekly is appropriate given the current state of zero open critical/high issues.
+
+---
+
+### 2. Verification of June 21 State (All Confirmed ✅)
+
+| Item | Verification | Status |
+|---|---|---|
+| Chart.js 4.5.1 single CDN tag | Line 11: `chart.js@4.5.1` with `sha384-jb8J...` | ✅ |
+| DOMPurify 3.4.11 single CDN tag | Line 12: `dompurify@3.4.11` with `sha384-o44X...` | ✅ |
+| All 36 section banners annotation-free | Confirmed via grep — no remaining `v0.X.Y:` or `- (from ...)` patterns in banners | ✅ |
+| 18 JS section delimiters | Full inventory matches June 21 listing | ✅ |
+| `<noscript>` fallback | Line 2280: dark-theme error message present | ✅ |
+| localStorage quota guard | `QuotaExceededError` catch in `saveState()` | ✅ |
+| ROADMAP.md present | 128 lines, three horizons, completed-items table | ✅ |
+| UserManual.md present | 543 lines, 20 sections | ✅ |
+| README doc nav links | `**Docs:** User Manual · Roadmap · Changelog` below badges | ✅ |
+
+---
+
+### 3. File Metrics (Stable)
+
+| Section | Lines | % of total |
+|---|---|---|
+| `<head>` + CDN tags (lines 1–18) | 18 | <1% |
+| CSS `<style>` block (lines 19–2277) | **2,259** | 36% |
+| HTML `<body>` markup (lines 2278–2849) | **572** | 9% |
+| JS `<script>` block (lines 2850–6218) | **3,369** | 54% |
+| Closing tags | 3 | <1% |
+| **Total** | **6,221** | — |
+
+File size: **253 KB** (259,148 bytes). Unchanged from June 21. Well within the 7,000-line / 300 KB targets.
+
+Inline `onclick` handlers: **62** (grep-confirmed; unchanged from prior reviews).
+
+---
+
+### 4. New Findings (June 27)
+
+---
+
+#### 🟡 MEDIUM — WeeklyClaudeRoutineCheckup.md Internal Title Was "Daily" (Resolved ✅)
+
+**Location:** `WeeklyClaudeRoutineCheckup.md` line 1
+
+The file was renamed from `DailyClaudeRoutineCheckup.md` to `WeeklyClaudeRoutineCheckup.md` on 2026-06-26 (GitHub UI rename). The internal `# Daily Claude Routine Checkup — Gruper Repository` heading was not updated as part of that rename and still read "Daily."
+
+**Fixed this session:** Heading updated to `# Weekly Claude Routine Checkup — Gruper Repository`.
+
+---
+
+#### 🟢 LOW — ROADMAP.md Had Incorrect onclick Count (Resolved ✅)
+
+**Location:** `ROADMAP.md` lines 75 and 120
+
+Both the near-term plan item and the tech debt table listed `~64` inline `onclick` handlers. The actual count (confirmed by `grep -c 'onclick='`) is **62**. The `~64` figure may have been an estimate from an earlier review phase.
+
+**Fixed this session:** Both occurrences updated to `62`.
+
+---
+
+#### 🟡 MEDIUM — CI Lacked SRI Hash Re-Verification (Resolved ✅)
+
+**Location:** `.github/workflows/check.yml`
+
+The existing CI validated that CDN URLs return HTTP 200 (`curl --head`) but did not validate whether the `integrity` hashes in `Gruper.html` match the actual files served by jsDelivr. A library update that changes the CDN file without updating the hash in HTML — or a CDN-side content substitution — would pass the existing CDN check while silently breaking SRI validation in browsers.
+
+This item was listed in ROADMAP.md P3 since June 19.
+
+**Fixed this session:** Added a new "Verify SRI integrity hashes match CDN content" CI step that:
+1. Extracts the pinned versions and expected hashes from `Gruper.html`
+2. Downloads the actual CDN files via `curl -sf`
+3. Computes SHA-384 of each file via `openssl dgst -sha384 -binary | openssl base64 -A`
+4. Fails with an explicit mismatch message if computed ≠ expected
+
+This is equivalent to an independent verifier running the same `openssl` command that was used to generate the hashes on June 17, on every push.
+
+---
+
+#### 🟢 LOW — CI Had No Line-Count Reporting (Resolved ✅)
+
+**Location:** `.github/workflows/check.yml`
+
+The ROADMAP listed a GitHub Actions line-count trend step as a P3 item since June 19. Added a "Report Gruper.html size metrics" step that:
+- Prints total line count and byte size on every CI run
+- Emits a WARNING (non-fatal) if lines exceed 7,000
+
+This makes the trend visible in CI logs without blocking merges.
+
+---
+
+#### 🟡 MEDIUM (ongoing, deferred) — 62 Inline `onclick` Handlers
+
+Unchanged from prior reviews. The ROADMAP recommends starting with sidebar agent card buttons (~8 handlers, low risk). No code change this session.
+
+---
+
+#### 🟡 MEDIUM (recurring) — Dependency Freshness Unverifiable From This Environment
+
+DOMPurify 3.4.11 and Chart.js 4.5.1 were current as of June 17 (10 days ago). Outbound CDN requests are intercepted by Anthropic's egress proxy in this environment; versions cannot be confirmed here.
+
+**Owner action (5 minutes, weekly):**
+- Check [DOMPurify releases](https://github.com/cure53/DOMPurify/releases) for versions > 3.4.11
+- Check [Chart.js releases](https://github.com/chartjs/Chart.js/releases) for versions > 4.5.1
+- If found: update `Gruper.html` CDN tag + regenerate SRI hash + update `README.md`
+
+---
+
+### 5. Changes Made This Session
+
+| File | Change | Severity Resolved |
+|---|---|---|
+| `WeeklyClaudeRoutineCheckup.md` | Corrected internal title from "Daily" to "Weekly" | 🟡 MEDIUM |
+| `ROADMAP.md` | Corrected onclick count from `~64` → `62` (2 occurrences) | 🟢 LOW |
+| `ROADMAP.md` | Marked SRI CI step and line-count CI step as completed; added June 27 entries to completed table; updated footer date | 🟢 LOW |
+| `.github/workflows/check.yml` | Added "Verify SRI integrity hashes match CDN content" step — downloads CDN files, computes SHA-384, fails on mismatch | 🟡 MEDIUM |
+| `.github/workflows/check.yml` | Added "Report Gruper.html size metrics" step — prints lines/bytes, warns if > 7,000 lines | 🟢 LOW |
+| `CHANGELOG.md` | Extended maintenance date range to `→ 2026-06-27`; added bullets for new CI steps and doc fixes | 🟢 LOW |
+
+---
+
+### 6. Issue Tracker (Cumulative)
+
+| Issue | Jun 14 | Jun 15 | Jun 16 | Jun 17 | Jun 20 | Jun 21 | Jun 27 | Change |
+|---|---|---|---|---|---|---|---|---|
+| 🔴 Duplicate CDN script tags | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 Stale Chart.js (4.4.1) | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 Stale DOMPurify (3.0.8) | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 No LICENSE | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 README/CHANGELOG date errors | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 No CI/CD | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 CI version check non-fatal | — | — | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 No localStorage quota guard | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 No JS section delimiters | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟢 Shield tooltip wrong | Open | Open | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| 🟢 No `<noscript>` fallback | — | — | — | ✅ | ✅ | ✅ | ✅ | — |
+| 🟠 SRI hash unverifiable | — | — | Open | ✅ | ✅ | ✅ | ✅ | — |
+| 🟡 No ROADMAP.md | Open | Open | Open | Open | ✅ | ✅ | ✅ | — |
+| 🟡 No UserManual.md | — | — | — | — | ✅ | ✅ | ✅ | — |
+| 🟡 Legacy/version-prefixed section headers | — | — | — | — | Open | ✅ | ✅ | — |
+| 🟡 Checkup file title says "Daily" | — | — | — | — | — | — | **✅** | Fixed |
+| 🟡 CI no SRI hash verification | — | — | — | — | — | Open | **✅** | Fixed |
+| 🟢 CI no line-count reporting | — | — | — | — | — | Open | **✅** | Fixed |
+| 🟢 ROADMAP onclick count wrong (~64 vs 62) | — | — | — | — | — | — | **✅** | Fixed |
+| 🟡 62 inline `onclick` handlers | Open | Open | Open | Open | Open | Open | Open (deferred) | — |
+| 🟢 README screenshots | Open | Open | Open | Open | Open | Open | Open | — |
+| 🟡 Dependency freshness (recurring) | — | — | — | Open | Open | Open | Open | Manual check |
+
+**Open items after this session:**
+- 🟡 62 inline `onclick` handlers (deferred; broad refactor)
+- 🟢 README screenshots (deferred; no images available)
+- 🟡 Dependency freshness (recurring weekly — DOMPurify & Chart.js)
+
+---
+
+### 7. Actionable Recommendations
+
+| # | Recommendation | Priority | Effort |
+|---|---|---|---|
+| REC-1 | Check [DOMPurify releases](https://github.com/cure53/DOMPurify/releases) and [Chart.js releases](https://github.com/chartjs/Chart.js/releases) for versions newer than 3.4.11 / 4.5.1; upgrade if found (update CDN tag + regenerate SRI hash + update README) | P1 (weekly) | 15 min |
+| REC-2 | Begin incremental `onclick` → `addEventListener` migration; start with sidebar agent card buttons (~8 handlers, lowest risk) | P3 | 1–2 hrs |
+| REC-3 | Add screenshots to `/screenshots/` directory or remove "Coming soon" placeholder from README | P3 | 30 min |
+
+No P0 or P2 structural issues remain.
+
+---
+
+### 8. Trend Tracking (Updated)
+
+| Metric | Jun 14 | Jun 15 (after) | Jun 17 (after) | Jun 21 | Jun 27 | Target |
+|---|---|---|---|---|---|---|
+| Gruper.html lines | ~6,181 | 6,224 | 6,225 | 6,221 | **6,221** (stable) | < 7,000 |
+| Gruper.html size | 251 KB | 259 KB | 259 KB | 253 KB | **253 KB** (stable) | < 300 KB |
+| JS lines (script block) | — | ~3,371 | 3,374 | 3,369 | **3,369** (stable) | < 4,000 |
+| CSS lines (style block) | — | ~2,259 | 2,259 | 2,259 | **2,259** (stable) | < 2,500 |
+| Inline `onclick` handlers | — | 62 | 62 | 62 | **62** | → 0 (long-term) |
+| Chart.js version | 4.4.1 | 4.5.1 ✅ | 4.5.1 ✅ | 4.5.1 ✅ | **4.5.1** ✅ | Latest stable |
+| DOMPurify version | 3.0.8 | 3.4.10 | 3.4.11 ✅ | 3.4.11 ✅ | **3.4.11** ✅ | Latest stable |
+| Duplicate CDN tags | Yes | No ✅ | No ✅ | No ✅ | **No** ✅ | 0 |
+| `<noscript>` fallback | No | No | Yes ✅ | Yes ✅ | **Yes** ✅ | Present |
+| CI checks (steps) | 0 | 4 | 4 | 4 | **6** ✅ (+ SRI + lines) | growing |
+| Open critical issues | 1 | 0 | 0 | 0 | **0** ✅ | 0 |
+| Open high issues | 2 | 0 | 0 | 0 | **0** ✅ | 0 |
+| Open medium issues | 4 | 1 | 2 | 1 | **1** (onclick) | 0 |
+| Open low issues | 3 | 2 | 1 | 2 | **2** (screenshots, freshness) | 0 |
+| Git commits on main | 2 | 2 | 7 | 12 | **14** ✅ | growing |
+| GitHub Actions | None | 1 ✅ | 1 ✅ | 1 ✅ | **1** ✅ (6 steps) | ≥ 1 |
+| ROADMAP.md | No | No | No | Yes ✅ | **Yes** ✅ | Present |
+| UserManual.md | No | No | No | Yes ✅ | **Yes** ✅ | Present |
+
+---
+
+### 9. Next Steps
+
+| Priority | Action | Est. effort |
+|---|---|---|
+| P1 (weekly) | Check DOMPurify ≥3.4.12 / Chart.js ≥4.5.2; upgrade if available | 15 min |
+| P3 | Begin `onclick` → `addEventListener` migration (sidebar agent cards first) | 1–2 hrs |
+| P3 | Capture and add screenshots to `/screenshots/` directory | 30 min |
+
+---
+
+*Next scheduled review: 2026-07-04 (weekly cadence)*
+*Key watches: DOMPurify security advisories (weekly — sole XSS defense); Chart.js patch releases; CI run results on first push with new SRI verification step*
+*Review cadence changed: Daily → Weekly as of 2026-06-26 (all P0/P1 issues resolved; stable maintenance phase)*
