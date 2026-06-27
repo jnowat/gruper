@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## Maintenance (2026-06-15 → 2026-06-21) — Infrastructure & Documentation
+## Maintenance (2026-06-15 → 2026-06-27) — Infrastructure & Documentation
 
 No version bump — these are infrastructure, security, and documentation changes only. `APP_VERSION` remains `0.4.5`.
 
@@ -21,6 +21,8 @@ No version bump — these are infrastructure, security, and documentation change
 - FIXED: `<noscript>` fallback added for JS-disabled browsers
 - FIXED: Disambiguated duplicate `INITIALIZATION` section headers in the JS block
 - FIXED: Cleaned up all legacy/version-prefixed and provenance-annotated section headers (JS and CSS blocks; 11 headers renamed across Jun 18–21, 1 redundant header removed)
+- FIXED: WeeklyClaudeRoutineCheckup.md internal title corrected from "Daily" to "Weekly" (file renamed 2026-06-26, title lagged)
+- FIXED: `ROADMAP.md` onclick handler count corrected from `~64` to `62` (confirmed by grep)
 
 **Infrastructure:**
 - ADDED: `LICENSE` (MIT)
@@ -32,6 +34,8 @@ No version bump — these are infrastructure, security, and documentation change
 - ADDED: `ROADMAP.md` — roadmap with architecture philosophy, near/medium/long-term plans, and known tech debt
 - ADDED: `UserManual.md` — full user manual covering setup, agents, controls, analytics, and troubleshooting
 - UPDATED: `README.md` — library versions, doc cross-links, screenshot placeholder cleanup
+- ADDED: GitHub Actions SRI hash re-verification step — downloads CDN files at CI time, computes SHA-384, fails if hashes diverge from `Gruper.html` `integrity` attributes
+- ADDED: GitHub Actions line-count reporting step — prints `Gruper.html` line/byte counts and warns if > 7,000 lines
 - UPDATED: `CHANGELOG.md` with this maintenance record
 
 ---

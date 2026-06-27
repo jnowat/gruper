@@ -57,6 +57,39 @@ jobs:
           fi
           echo "Version consistency OK: $HTML_VER"
 
+      - name: Verify SRI integrity hashes match CDN content
+        run: |
+          CHARTJS_VER=$(grep -oP 'chart\.js@\K[\d.]+' Gruper.html | head -1)
+          DOMPURIFY_VER=$(grep -oP 'dompurify@\K[\d.]+' Gruper.html | head -1)
+          CHARTJS_EXPECTED=$(grep -oP "chart\.js@${CHARTJS_VER}[^\"]*\" integrity=\"sha384-\K[^\"]+" Gruper.html | head -1)
+          DOMPURIFY_EXPECTED=$(grep -oP "dompurify@${DOMPURIFY_VER}[^\"]*\" integrity=\"sha384-\K[^\"]+" Gruper.html | head -1)
+          echo "Expected Chart.js hash:   $CHARTJS_EXPECTED"
+          echo "Expected DOMPurify hash:  $DOMPURIFY_EXPECTED"
+          curl -sf "https://cdn.jsdelivr.net/npm/chart.js@${CHARTJS_VER}/dist/chart.umd.min.js" -o /tmp/chart.js
+          curl -sf "https://cdn.jsdelivr.net/npm/dompurify@${DOMPURIFY_VER}/dist/purify.min.js" -o /tmp/purify.js
+          COMPUTED_CHARTJS=$(openssl dgst -sha384 -binary /tmp/chart.js | openssl base64 -A)
+          COMPUTED_DOMPURIFY=$(openssl dgst -sha384 -binary /tmp/purify.js | openssl base64 -A)
+          echo "Computed Chart.js hash:   $COMPUTED_CHARTJS"
+          echo "Computed DOMPurify hash:  $COMPUTED_DOMPURIFY"
+          if [ "$CHARTJS_EXPECTED" != "$COMPUTED_CHARTJS" ]; then
+            echo "ERROR: Chart.js SRI hash mismatch — update integrity attribute in Gruper.html"
+            exit 1
+          fi
+          if [ "$DOMPURIFY_EXPECTED" != "$COMPUTED_DOMPURIFY" ]; then
+            echo "ERROR: DOMPurify SRI hash mismatch — update integrity attribute in Gruper.html"
+            exit 1
+          fi
+          echo "SRI hash verification passed"
+
+      - name: Report Gruper.html size metrics
+        run: |
+          TOTAL_LINES=$(wc -l < Gruper.html)
+          FILE_SIZE=$(wc -c < Gruper.html)
+          echo "Gruper.html: $TOTAL_LINES lines / $FILE_SIZE bytes"
+          if [ "$TOTAL_LINES" -gt 7000 ]; then
+            echo "WARNING: Gruper.html exceeds 7,000-line maintainability target — consider refactoring"
+          fi
+
       - name: Check for duplicate CDN script tags
         run: |
           CHARTJS_COUNT=$(grep -c "cdn.jsdelivr.net/npm/chart.js" Gruper.html || true)

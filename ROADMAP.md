@@ -44,6 +44,10 @@ The single-file ethos becomes a constraint if/when `Gruper.html` grows beyond ~5
 | 2026-06-19 | Clean up README screenshot placeholder; add doc cross-links |
 | 2026-06-20 | Rename JS section headers: `UI RENDERING` → `SIDEBAR & AGENT CONFIG`, `CONVERSATION ENGINE` → `TASK INPUT & VALIDATION`, two version-prefixed headers cleaned |
 | 2026-06-21 | Strip remaining provenance/version annotations from 7 section headers (2 CSS + 5 JS); update CHANGELOG date range; refresh ROADMAP |
+| 2026-06-27 | Add SRI hash re-verification step to GitHub Actions CI (`check.yml`) — downloads CDN files, computes SHA-384, fails if hashes diverge |
+| 2026-06-27 | Add line-count reporting step to CI — warns if `Gruper.html` exceeds 7,000 lines |
+| 2026-06-27 | Fix WeeklyClaudeRoutineCheckup.md internal title (was still "Daily" after June 26 file rename) |
+| 2026-06-27 | Correct onclick handler count in ROADMAP.md (`~64` → `62`, confirmed by grep) |
 | v0.4.5 | Streamlined round summary, removed verbose analysis blocks |
 | v0.4.4 | Version display consistency, embedded changelog extracted |
 | v0.4.3 | Critical `agents.find` bug fix |
@@ -72,11 +76,11 @@ Items with known scope and low architectural risk.
 
 ### P3 — Maintenance & Quality
 
-- **Reduce inline `onclick` handlers** (~64 currently) — migrate to `addEventListener` calls for CSP compatibility and testability; can be done incrementally without breaking the single-file model
+- **Reduce inline `onclick` handlers** (62 currently) — migrate to `addEventListener` calls for CSP compatibility and testability; can be done incrementally without breaking the single-file model
 - **Add screenshot examples to README** — remove the "coming soon" placeholder
 - **localStorage usage meter** — show current storage consumption and a manual clear option in the UI
-- **GitHub Actions: SRI re-verification** — add step to download CDN files and re-verify SRI hashes on each push
-- **GitHub Actions: line-count trend** — report `Gruper.html` line-count growth as a CI metric
+- ~~**GitHub Actions: SRI re-verification**~~ ✅ Done 2026-06-27
+- ~~**GitHub Actions: line-count trend**~~ ✅ Done 2026-06-27
 
 ---
 
@@ -117,7 +121,7 @@ Items that are desirable but require more design work or carry higher risk.
 
 | Item | Severity | Notes |
 |------|----------|-------|
-| ~64 inline `onclick` handlers | Medium | Blocks strict CSP; refactor incrementally |
+| 62 inline `onclick` handlers | Medium | Blocks strict CSP; refactor incrementally |
 | No automated tests | Medium | Single-file architecture makes unit tests awkward; smoke tests via Playwright feasible |
 | `localStorage` growth | Low | Quota guard is in place; a usage meter and trim UI would be nice |
 | File size growth trend | Low | ~260 KB today; monitor monthly |
@@ -125,5 +129,5 @@ Items that are desirable but require more design work or carry higher risk.
 
 ---
 
-*Last updated: 2026-06-21 by Claude (routine review)*
-*Maintained alongside `DailyClaudeRoutineCheckup.md` — review and update at each daily check.*
+*Last updated: 2026-06-27 by Claude (weekly review)*
+*Maintained alongside `WeeklyClaudeRoutineCheckup.md` — review and update at each weekly check.*
