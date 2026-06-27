@@ -425,6 +425,16 @@ Out of scope for the pre-1.0 track. Not scheduled until v1.0 is shipped and stab
 
 ---
 
+## Future Considerations
+
+Not assigned to any phase or work packet. Long-term items to keep in mind for later.
+
+- Automatic self-updating system for the desktop app
+- Proper crash reporting and error telemetry
+- First-launch onboarding / setup wizard
+
+---
+
 *Last updated: 2026-06-27*
 *Companion document: `GruperDistributedSpec.md` — architecture diagrams, data models, wire schemas, security threat table, and open questions (OQ-1…OQ-5).*
 *Gruper core baseline: `v0.4.5` (`Gruper.html`) — this roadmap builds on core, not over it.*

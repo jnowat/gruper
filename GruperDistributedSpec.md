@@ -5,7 +5,7 @@ spec_version: "0.2 — Design Draft"
 product_status: "Pre-release / Pre-v1 — no v1.0 until the first stable release ships"
 core_baseline: "Gruper v0.4.5 (single-file local multi-agent conversation system)"
 date: "2026-06-27"
-owner: "Jacob Nowatzke — Stelminado, LLC"
+owner: "Prime User — Stelminado, LLC"
 related_projects:
   - "Gruper core (Gruper.html — single-file local multi-agent conversation system, v0.4.5)"
   - "SteloPTC (Tauri/Svelte tissue-culture specimen tracking with local AI)"
@@ -45,7 +45,7 @@ Gruper core (v0.4.5) already delivers up to six configurable AI agents in a sing
 
 - **LAN agents** — your desktops, laptops, and always-on mini-PCs (Intel NUC, Beelink) at home or in the office.
 - **Cloud agents** — AWS EC2 instances (Dockerized, auto-registering, spot-friendly), including GPU inference instances for heavy workloads.
-- **Permissioned cross-user agents** — you, in Houston, can add a trusted collaborator's computer in San Diego as an assignable agent in your fleet and task it directly. They can do the same with yours. The remote machine appears in your Manager Console as a first-class, scoped resource — no shared LAN, no port forwarding, no screen sharing, no VPN configuration required.
+- **Permissioned cross-user agents** — you, in Locale 1, can add a trusted collaborator's computer in Locale 2 as an assignable agent in your fleet and task it directly. They can do the same with yours. The remote machine appears in your Manager Console as a first-class, scoped resource — no shared LAN, no port forwarding, no screen sharing, no VPN configuration required.
 
 This turns idle personal hardware and cheap cloud burst into an **elastic, location-independent AI workforce grid.** Tasks — research synthesis, protocol analysis, data processing, report generation, document drafting, scheduling — can be explicitly assigned to a specific remote agent or routed to a capability-matched pool, with live monitoring, queuing, result streaming, and a full audit trail.
 
@@ -71,7 +71,7 @@ For a pharma startup running overnight protocol optimizations, a biological lab 
 ### 1.2 Primary Goals
 
 - **True distributed agent execution** across heterogeneous environments and ownership boundaries — your LAN, the cloud, and other people's machines.
-- **The "not just my own network" requirement, concretely:** a Manager Console in Houston can task an agent on a collaborator's PC in San Diego, or on AWS GPU instances in `us-west-2`, over the public internet, with no inbound networking required on the agent side.
+- **The "not just my own network" requirement, concretely:** a Manager Console in Locale 1 can task an agent on a collaborator's node in Locale 2, or on AWS GPU instances in `us-west-2`, over the public internet, with no inbound networking required on the agent side.
 - **Symmetric, owner-controlled sharing** — vice-versa assignment with granular scoping and an instant kill switch.
 - **Leverage existing hardware** — idle collaborator laptops, gaming PCs, home servers — plus cheap cloud burst (spot instances, idle-time GPU).
 - **Keep sensitive workloads local or on explicitly trusted nodes** — cloud only for non-sensitive parallel work, enforced by data-class policy.
@@ -91,7 +91,7 @@ These are the acceptance bar for the first stable release. v1.0 is declared only
 
 | # | Criterion | Target |
 |---|-----------|--------|
-| SC-1 | Time to add a remote agent (San Diego PC or AWS) to a fleet and receive its first task result end-to-end | **< 5 min** from install |
+| SC-1 | Time to add a remote agent (Locale 2 or AWS) to a fleet and receive its first task result end-to-end | **< 5 min** from install |
 | SC-2 | Dispatch overhead for a remote task, excluding model execution time | **< 5–10 s** typical |
 | SC-3 | Owner revocation of a shared agent takes effect | **Immediately** — no new tasks accepted; in-flight tasks killable |
 | SC-4 | All traffic authenticated, encrypted, and auditable | **100%** of connections; no anonymous dispatch |
@@ -103,9 +103,9 @@ These are the acceptance bar for the first stable release. v1.0 is declared only
 
 ## 2. Key Use Cases
 
-### UC-1 — Cross-City Direct Assignment (Houston ↔ San Diego) — *the defining case*
+### UC-1 — Cross-Location Direct Assignment (Locale 1 ↔ Locale 2) — *the defining case*
 
-You (Houston) have a multi-hour research and synthesis task. Your collaborator in San Diego runs the agent runtime on a 64 GB / RTX 4090 workstation. From your Manager Console you assign the task **directly to their machine** — it runs against their local Ollama using the model capabilities you specified. Their agent streams progress; you receive the final report and artifacts. You never RDP, screen-share, or touch their network config. They granted you a scoped share token; they can revoke it in one click.
+You (Locale 1) have a multi-hour research and synthesis task. A trusted collaborator in Locale 2 runs the agent runtime on a 64 GB / RTX 4090 workstation. From your Manager Console you assign the task **directly to their machine** — it runs against their local Ollama using the model capabilities you specified. Their agent streams progress; you receive the final report and artifacts. You never RDP, screen-share, or touch their network config. They granted you a scoped share token; they can revoke it in one click.
 
 ### UC-2 — Hybrid Local + Cloud Burst
 
@@ -113,11 +113,11 @@ Daily lightweight interactive work runs on your laptop and home mini-PC (low lat
 
 ### UC-3 — Employee / Contractor Compute Contribution
 
-A part-time researcher in another state installs the desktop agent on their personal laptop. You grant them the right to submit certain task types to your agents; they grant you the right to assign research tasks to their machine during agreed hours only. Both sides can audit every task dispatched. Mutual benefit, explicit scope, instant revocation available to either party.
+A part-time researcher in another region installs the desktop agent on their personal laptop. You grant them the right to submit certain task types to your agents; they grant you the right to assign research tasks to their machine during agreed hours only. Both sides can audit every task dispatched. Mutual benefit, explicit scope, instant revocation available to either party.
 
 ### UC-4 — Hierarchical Manager Agents
 
-A "Lead Researcher" meta-agent on your always-on orchestrator decomposes a goal, assigns sub-tasks to the best available agents (local for low-latency context gathering, the San Diego high-RAM box for heavy model inference, AWS for parallel web research), aggregates results, and delivers the final output. The human manager assigns the goal to the manager agent; the manager agent dispatches to worker agents across ownership boundaries, within the scopes its token allows. Every dispatch is auditable.
+A "Lead Researcher" meta-agent on your always-on orchestrator decomposes a goal, assigns sub-tasks to the best available agents (local for low-latency context gathering, the Locale 2 high-RAM node for heavy model inference, AWS for parallel web research), aggregates results, and delivers the final output. The human manager assigns the goal to the manager agent; the manager agent dispatches to worker agents across ownership boundaries, within the scopes its token allows. Every dispatch is auditable.
 
 ### UC-5 — Pharma / Biotech Protocol Pipeline
 
@@ -131,7 +131,7 @@ A tissue culture lab running SteloPTC for specimen tracking extends its monitori
 
 An observatory renter books telescope time overnight. A remote monitoring agent on the observatory's always-on node (running as a shared agent under a scoped grant to the renter) handles scheduling, telescope control callbacks, and anomaly detection. A processing agent on the renter's home workstation ingests imaging data as it arrives. The renter sees live task status from their laptop without staying awake — and can approve human-gated actions from their phone.
 
-### UC-8 — Resilience / Offline Tolerance (rural TX, travel)
+### UC-8 — Resilience / Offline Tolerance (field / travel scenario)
 
 A field laptop loses internet mid-task. Locally-targeted tasks continue running from the on-device queue. When connectivity returns, the agent reconciles with the orchestrator: results uploaded, new assignments pulled, no data lost. The exponential-backoff reconnect pattern mirrors Gruper core's existing API retry discipline (2 s / 4 s / 8 s / 16 s), applied now to the persistent orchestrator connection rather than a single API call.
 
@@ -147,7 +147,7 @@ A lightweight read-only view (later: PWA / Tauri mobile) lets you watch fleet st
 
 **Every agent makes an *outbound* authenticated, persistent connection to an orchestrator. Nothing ever connects *into* an agent.**
 
-This single decision is what lets a San Diego desktop, a corporate-firewalled laptop, and an AWS spot instance all participate identically. Outbound port 443 is allowed virtually everywhere; NAT is traversed by the agent dialing out; and the orchestrator becomes a reliable relay for pushing tasks and streaming results back. Direct peer-to-peer is an optimization added later — it is never a requirement for the system to function.
+This single decision is what lets a Locale 2 desktop, a corporate-firewalled laptop, and an AWS spot instance all participate identically. Outbound port 443 is allowed virtually everywhere; NAT is traversed by the agent dialing out; and the orchestrator becomes a reliable relay for pushing tasks and streaming results back. Direct peer-to-peer is an optimization added later — it is never a requirement for the system to function.
 
 This relay model extends a pattern Gruper core already uses: core's agents dial out to a local Ollama endpoint and stream responses back over HTTP. Gruper Distributed generalizes that outbound-connection discipline to a persistent, authenticated orchestrator channel that works across any network boundary.
 
@@ -155,7 +155,7 @@ This relay model extends a pattern Gruper core already uses: core's agents dial 
 
 ```mermaid
 flowchart TB
-    subgraph Console["Manager Console — Tauri + Svelte\n(Houston, or anywhere)"]
+    subgraph Console["Manager Console — Tauri + Svelte\n(Locale 1, or anywhere)"]
         UI["Fleet view · Task composer · Sharing panel\nMonitoring · Crew builder\n[embeds Gruper core conversation + analytics UI]"]
     end
 
@@ -176,7 +176,7 @@ flowchart TB
         A3["Agent Node — EC2 (Docker)\nGPU Ollama · auto-register · spot\ncost caps · idle auto-terminate"]
     end
 
-    subgraph Remote["Collaborator (San Diego)"]
+    subgraph Remote["Collaborator (Locale 2)"]
         A4["SHARED Agent Node — their PC\nOwner-controlled · scoped token\nOwner retains instant revoke"]
     end
 
@@ -193,11 +193,11 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-    participant M as Manager Console (Houston)
+    participant M as Manager Console (Locale 1)
     participant O as Orchestrator
-    participant A as Shared Agent (San Diego)
+    participant A as Shared Agent (Locale 2)
 
-    M->>O: Submit task (target=san-diego-uuid, share-token, data-class)
+    M->>O: Submit task (target=locale2-uuid, share-token, data-class)
     O->>O: Verify token scope · quotas · time window · data class
     O->>O: Enqueue (priority · deadline)
     O-->>A: Push task over existing outbound WSS
@@ -214,14 +214,14 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    JM["Jacob\n(manager identity)"] -->|owns| JA["Jacob's agents\n(LAN + cloud)"]
-    CM["Collaborator\n(San Diego)"] -->|owns| CA["Collaborator's agents\n(their PC)"]
-    CM -->|grants scoped token| JM
-    JM -->|grants scoped token| CM
-    JM -->|may task within scope| CA
-    CM -->|may task within scope| JA
+    PU["Prime User\n(manager identity)"] -->|owns| PUA["Prime User's agents\n(LAN + cloud)"]
+    TC["Trusted Collaborator\n(Locale 2)"] -->|owns| TCA["Collaborator's agents\n(their PC)"]
+    TC -->|grants scoped token| PU
+    PU -->|grants scoped token| TC
+    PU -->|may task within scope| TCA
+    TC -->|may task within scope| PUA
     classDef agent fill:#1f2937,color:#e5e7eb,stroke:#374151;
-    class JA,CA agent;
+    class PUA,TCA agent;
 ```
 
 ---
@@ -237,7 +237,7 @@ The Agent Runtime is the program that turns a machine into an assignable AI work
 | **Desktop** | Windows / macOS / Linux laptops, desktops, mini-PCs | Tauri app + background service (systemd / launchd / Windows Service) | "Install as Agent Node" wizard; optional Ollama bootstrap; mDNS LAN discovery optional |
 | **Container** | AWS EC2, VPS, on-prem servers, NUC/Beelink | Multi-arch Docker image (CPU + CUDA variants) | `docker run` or Terraform; reads env secrets; auto-registers on boot |
 
-> **Cross-network enabler:** both paths execute the same outbound registration handshake. A desktop in San Diego and an EC2 instance in Oregon are indistinguishable to the orchestrator except for their reported capabilities and owner identity.
+> **Cross-network enabler:** both paths execute the same outbound registration handshake. A desktop in Locale 2 and an EC2 instance in Oregon are indistinguishable to the orchestrator except for their reported capabilities and owner identity.
 
 ### 4.2 Installation UX
 
@@ -263,9 +263,9 @@ The capability schema extends Gruper core's per-agent configuration (model, para
 ```json
 {
   "agent_id": "uuid",
-  "owner_id": "jacob-uuid",
-  "name": "SanDiego-Workstation",
-  "location_tag": "collab-san-diego",
+  "owner_id": "prime-user-uuid",
+  "name": "Locale2-Workstation",
+  "location_tag": "collab-locale2",
   "jurisdiction": "US",
   "hardware": {
     "cpu_cores": 16,
@@ -278,7 +278,7 @@ The capability schema extends Gruper core's per-agent configuration (model, para
   "roles": ["researcher", "data_analyst"],
   "network": { "type": "residential", "latency_class": "medium" },
   "availability": {
-    "windows": ["Mon-Fri 09:00-18:00 America/Los_Angeles"]
+    "windows": ["Mon-Fri 09:00-18:00 America/Chicago"]
   },
   "runtime_version": "gd-0.1.0",
   "status": "idle",
@@ -333,7 +333,7 @@ One orchestrator instance comfortably coordinates dozens to low-hundreds of agen
 - **AuthN/AuthZ:** identity verification and **share-ACL enforcement on every dispatch** (§8).
 - **Task intake:** from the Manager Console, REST API, other agents (manager agents), and n8n webhooks.
 - **Dispatch logic:**
-  - *Explicit:* `assigned_agent_id = "san-diego-uuid"`.
+  - *Explicit:* `assigned_agent_id = "locale2-uuid"`.
   - *Capability/policy match:* "needs ≥ 32 GB RAM + `code_interpreter` + `researcher` role + `jurisdiction = US`."
   - *Cost/latency-aware:* prefer local for interactive work; AWS spot for batch.
   - *Queue management:* priorities, deadlines, retries, dead-letter handling.
@@ -349,7 +349,7 @@ This is the single most consequential architectural decision. Two viable pattern
 
 One orchestrator instance (self-hosted, or a small hosted service) serves all users. Each agent registers under its **owner's namespace**. An owner mints a **time-limited, scoped share token** for a specific agent or group. The recipient imports the token in their console; the agent appears in their fleet with the granted scope. All task traffic routes through the orchestrator; the owner retains a global kill switch.
 
-*Why Pattern A first:* makes the "San Diego PC shows up in the Houston console" experience trivial, secure, and centrally auditable — the lowest moving-part count for the headline use case.
+*Why Pattern A first:* makes the "Locale 2 agent appears in the Locale 1 console" experience trivial, secure, and centrally auditable — the lowest moving-part count for the headline use case.
 
 **Pattern B — Federated / direct-to-owner (post-v1)**
 
@@ -523,7 +523,7 @@ Hash-chaining (`prev_hash` references the hash of the prior event) provides tamp
 | Identity / auth | **ed25519 keypairs + signed capability tokens (JWT or biscuit)** | Strong identity, federation-friendly, owner-sovereign, no third-party auth dependency |
 | Storage | **Central PostgreSQL + per-agent SQLite** | Query power and JSONB flexibility centrally; privacy and offline buffering at the edge |
 
-**Phased tech posture:** prototype the full cross-network path in Python to reach a working Houston → San Diego demo as fast as possible. Port security-critical and high-throughput components to Rust once the relay model is validated in production. Add direct P2P, federation, and gRPC only after the WSS relay path is solid.
+**Phased tech posture:** prototype the full cross-network path in Python to reach a working Locale 1 → Locale 2 demo as fast as possible. Port security-critical and high-throughput components to Rust once the relay model is validated in production. Add direct P2P, federation, and gRPC only after the WSS relay path is solid.
 
 ---
 
@@ -535,7 +535,7 @@ Hash-chaining (`prev_hash` references the hash of the prior event) provides tamp
 flowchart LR
     G0["gd-0.1\nFoundations\n(schemas · contracts)"]
     G1["gd-0.2\nWalking skeleton\n(1 owner · relay works)"]
-    G2["gd-0.3\nCross-network + sharing\n(Houston↔San Diego)"]
+    G2["gd-0.3\nCross-network + sharing\n(Locale 1↔Locale 2)"]
     G3["gd-0.4\nAWS burst\n+ cost controls"]
     G4["gd-0.5\nSecurity hardening\n+ sandbox parity\n+ E2E encryption"]
     G5["gd-0.6–0.9\nConsole polish\n· crews · beta"]
@@ -575,11 +575,11 @@ flowchart LR
 
 ### `gd-0.3` — Cross-network + sharing *(the headline milestone)*
 
-**Goal:** UC-1 (Houston → San Diego) works for real.
+**Goal:** UC-1 (Locale 1 → Locale 2) works for real.
 
 - Pattern A multi-tenant orchestrator: user namespaces, agents-under-owners, **scoped share token minting and import**.
 - Token import UX: paste a token string or scan a QR code → the shared agent appears in the fleet with its granted scope and a clear "shared / limited" badge.
-- A real second person's machine (the San Diego collaborator) installs the desktop agent, receives a share token, and executes a task assigned from Houston. **Instant revoke is tested.**
+- A remote collaborator's machine installs the desktop agent, receives a share token, and executes a cross-location task. **Instant revoke is tested.**
 - The task flow runs against **the remote agent's local Ollama**, using the same model parameter schema from `gd-0.1` — the submitter specifies model preferences; the agent uses its closest available match.
 - Manager-agent delegation: a meta-agent dispatches sub-tasks using a *subset* of the human principal's scope; the console shows the delegation chain.
 
@@ -694,7 +694,7 @@ No public trustless marketplace. No blockchain incentives. Keep the trust model 
 4. **Confirm the closed beta circle** — 2–3 trusted collaborators across real locations (lab partner, astronomy contact, consulting peer) — so `gd-0.3` has real cross-network testers from the start.
 5. **Confirm the working name** before any public artifacts, installers, or domain registrations use it.
 
-*Gruper Distributed fully incorporates the requirement that the system is not limited to one's own network. It enables AWS agents and permissioned assignment of agents on other users' computers — the Houston ↔ San Diego case, the pharma lab cross-site case, the astronomy observatory remote case — forming a practical, auditable, owner-sovereign distributed computing fabric for AI managers and workers. It remains explicitly pre-v1 until the first stable release ships.*
+*Gruper Distributed fully incorporates the requirement that the system is not limited to one's own network. It enables AWS agents and permissioned assignment of agents on other users' computers — the Locale 1 ↔ Locale 2 case, the pharma lab cross-site case, the astronomy observatory remote case — forming a practical, auditable, owner-sovereign distributed computing fabric for AI managers and workers. It remains explicitly pre-v1 until the first stable release ships.*
 
 **End of specification — Design Draft `gd-0.2`**
 
@@ -724,9 +724,9 @@ Container sandboxing is well-understood. Desktop sandboxing across Windows, macO
 
 **Sub-10-second, observable dispatch over the outbound relay.**
 
-If assigning a task to the San Diego box or an AWS GPU is one click, shows live progress within seconds, and requires no networking ceremony — it feels like one elastic computer. If it requires VPN setup, port forwarding, or produces a slow opaque "dispatching…" state that eventually times out — it feels like brittle remote SSH with extra steps, and no one will use it for real work.
+If assigning a task to the Locale 2 node or an AWS GPU is one click, shows live progress within seconds, and requires no networking ceremony — it feels like one elastic computer. If it requires VPN setup, port forwarding, or produces a slow opaque "dispatching…" state that eventually times out — it feels like brittle remote SSH with extra steps, and no one will use it for real work.
 
-Everything else in this spec — agent frameworks, P2P, federation, crew builders — is secondary to nailing that experience. The outbound relay model (§3.1 + §3.3) is the correct foundation; the engineering discipline is making the `gd-0.3` milestone feel *fast and transparent*, not just *functional*. Live progress streaming, clear "task dispatched to San Diego (waiting for model)" status, and sub-5-second acknowledgment are the differentiators, not the underlying protocol.
+Everything else in this spec — agent frameworks, P2P, federation, crew builders — is secondary to nailing that experience. The outbound relay model (§3.1 + §3.3) is the correct foundation; the engineering discipline is making the `gd-0.3` milestone feel *fast and transparent*, not just *functional*. Live progress streaming, clear "task dispatched to Locale 2 (waiting for model)" status, and sub-5-second acknowledgment are the differentiators, not the underlying protocol.
 
 ---
 
@@ -752,7 +752,7 @@ Pre-v1 scope must be defended actively. Every compelling integration or extensio
 
 2. **OQ-1 (agent loop, restated):** Custom ReAct loop (consistent with Gruper core's hand-built philosophy, maximum control) vs adopting LangGraph or CrewAI (faster framework-provided capabilities, more external dependency)? This decision locks the task/state schema.
 
-3. **Inference for shared agents:** when you task the San Diego machine, does it use the *owner's* installed Ollama models by default (you see what they have; you pick from their capability list), or can the *submitter* pin a specific model the remote machine may not have (requiring the agent to pull it on demand, with the latency and storage implications that entails)?
+3. **Inference for shared agents:** when you task a remote machine, does it use the *owner's* installed Ollama models by default (you see what they have; you pick from their capability list), or can the *submitter* pin a specific model the remote machine may not have (requiring the agent to pull it on demand, with the latency and storage implications that entails)?
 
 4. **E2E encryption timing:** is E2E payload encryption a `gd-0.3` blocker — no real sharing with real data until it exists — or is `gd-0.5` acceptable, with `gd-0.3` sharing explicitly limited to a trusted-circle, non-sensitive pilot?
 
