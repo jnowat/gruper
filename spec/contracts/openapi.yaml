@@ -36,6 +36,8 @@ tags:
     description: Authentication and token issuance
   - name: agents
     description: Agent registration and fleet management
+  - name: console
+    description: Manager Console WebSocket connection
   - name: tasks
     description: Task submission, polling, and lifecycle
   - name: tokens
@@ -43,7 +45,7 @@ tags:
   - name: audit
     description: Append-only audit event log
   - name: pools
-    description: Cloud agent pool management (WP-13)
+    description: Cloud agent pool management (WP-13 / gd-0.4)
   - name: metrics
     description: Operational metrics
 
@@ -294,12 +296,12 @@ paths:
         WebSocket endpoint for the Manager Console (Tauri/Svelte) to receive
         real-time fleet events, task progress, and queue depth updates.
 
-        The console does not send agent-protocol messages — it is a subscriber only.
+        The console is a subscriber only — it does not send agent-protocol messages.
         Message types received: `fleet_event`, `task_progress`, `task_complete`,
         `token_event`, `queue_depth`.
 
         See `wss-messages.schema.json` for the full message schema.
-      tags: [agents]
+      tags: [console]
       security:
         - BearerAuth: []
       x-protocol: websocket
@@ -729,7 +731,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
-  # ── Pools (WP-13 / gd-0.7) ───────────────────────────────────────────────
+  # ── Pools (WP-13 / gd-0.4) ───────────────────────────────────────────────
 
   /pools:
     post:
@@ -737,7 +739,7 @@ paths:
       summary: Create a cloud agent pool
       description: |
         Provisions a cloud agent pool (e.g. AWS EC2 auto-scaling group).
-        Available from gd-0.7 (WP-13). Returns 501 in earlier milestone builds.
+        Available from gd-0.4 (WP-13). Returns 501 in earlier milestone builds.
 
         Emits `pool_created` audit event.
       tags: [pools]
@@ -934,7 +936,7 @@ components:
           description: User.id claiming identity
         challenge:
           type: string
-          description: Opaque challenge string previously issued by the orchestrator (not shown — challenge issuance is out-of-band for gd-0.1; a dedicated `/auth/challenge` endpoint is added in gd-0.2)
+          description: Opaque challenge string previously issued by the orchestrator. Challenge issuance is out-of-band for gd-0.1; a dedicated `POST /auth/challenge` endpoint is added in gd-0.2.
         signature:
           type: string
           description: Base64url-encoded ed25519 signature over `SHA-256(challenge)` using User.pubkey
@@ -955,7 +957,7 @@ components:
 
     AgentRegistrationRequest:
       type: object
-      required: [name, pubkey, capabilities, runtime_version, signature]
+      required: [name, pubkey, capabilities, runtime_version, signature, timestamp]
       properties:
         name:
           type: string
@@ -1147,7 +1149,7 @@ components:
 
     TaskInputPlaintext:
       type: object
-      required: [prompt]
+      required: [_type, prompt]
       properties:
         _type:
           type: string

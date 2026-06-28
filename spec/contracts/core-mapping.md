@@ -139,12 +139,10 @@ Gruper core's circuit-breaker pattern:
 - **Recovery:** manual reset via UI
 
 The distributed agent runtime mirrors this for its Ollama connection:
-- 3 consecutive Ollama failures → agent marks itself `degraded`
-- Sends `status: "degraded"` in the next heartbeat
-- Orchestrator stops routing to the agent until operator acknowledges
-- Applies the same `[2000, 4000, 8000, 16000]` ms backoff to Ollama retries
-- The same `[2000, 4000, 8000, 16000]` ms backoff also applies to WSS
-  reconnects to the orchestrator (independent circuit from the Ollama circuit)
+- 3 consecutive Ollama failures → agent marks itself `degraded`, sends `status: "degraded"` in the next heartbeat
+- Orchestrator stops routing to the agent until an operator acknowledges
+- Ollama retries use the same `[2000, 4000, 8000, 16000]` ms backoff
+- WSS reconnects to the orchestrator use the same backoff on an independent circuit
 
 ---
 
@@ -188,6 +186,6 @@ schema.
 | Patient | 600,000 | 600 |
 | Very Patient | 900,000 | 900 |
 | Custom (60–3600 s) | 60,000–3,600,000 | 60–3600 |
+| Extended batch (distributed only) | — | up to 86400 |
 
-The distributed schema uses seconds (`timeout_s`) rather than milliseconds for
-clarity in the task submission API.
+The distributed schema uses seconds (`timeout_s`) rather than milliseconds for clarity. The upper bound is extended to 86400 s (24 h) for overnight batch tasks — a range not present in Gruper core, which caps at 3600 s.

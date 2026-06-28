@@ -50,7 +50,7 @@
 - **Dependencies:** OQ-1 and OQ-2 resolved.
 - **Exit gate:** Schemas agreed and published. An independent implementer can build against them without reopening architecture decisions.
 
-**Notes (2026-06-28):** Contracts package committed. `spec/contracts/` contains OpenAPI 3.1 YAML (all REST and WebSocket endpoints), WSS message schema (6 agent→orchestrator + 5 orchestrator→agent + 5 orchestrator→console message types), 5 versioned JSON Schema data models, core parameter mapping doc, and package README. OQ-1 and OQ-2 resolved. Pending: independent review and WP-02 implementation confirmation.
+**Notes (2026-06-28):** `spec/contracts/` committed. Contains: OpenAPI 3.1 YAML (17 endpoints across 8 tags), WSS message schema (16 message types: 6 agent→orchestrator, 5 orchestrator→agent, 5 orchestrator→console), 5 versioned JSON Schema 2020-12 data models, Gruper Core parameter mapping doc, and package README with OQ resolutions. OQ-1 and OQ-2 resolved. **Pending before closing:** independent implementer review; WP-02 confirms schemas are buildable.
 
 ---
 

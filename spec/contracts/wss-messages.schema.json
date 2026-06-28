@@ -67,8 +67,6 @@
       ]
     },
 
-    "────────────────────────────────────────────────────────": {},
-
     "AgentRegisterMessage": {
       "description": "Sent by the agent immediately after WebSocket upgrade to identify itself. The orchestrator replies with 'registered' or closes the connection if the agent_id does not match the Bearer token.",
       "type": "object",
@@ -354,8 +352,6 @@
       }
     },
 
-    "────────────────────────────────────────────────────────2": {},
-
     "OrchestratorRegisteredMessage": {
       "description": "Sent by the orchestrator in response to a 'register' message. Confirms the connection and provides the agent with any pending tasks or share_policy updates.",
       "type": "object",
@@ -531,15 +527,13 @@
             "reason": {
               "type": ["string", "null"],
               "enum": ["pool_drain", "spot_termination", "operator_request", "runtime_upgrade", null],
-              "description": "Human-readable reason for the drain.",
+              "description": "Machine-readable reason code for the drain.",
               "default": null
             }
           }
         }
       }
     },
-
-    "────────────────────────────────────────────────────────3": {},
 
     "ConsoleFleetEventMessage": {
       "description": "Sent by the orchestrator to the Manager Console whenever agent status changes. Keeps the fleet view in sync without polling.",
