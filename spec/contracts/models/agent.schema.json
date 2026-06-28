@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gruper.dev/schemas/gd-0.1/agent.json",
+  "title": "Agent",
+  "description": "Gruper Distributed agent node record. Represents a machine (desktop, server, EC2 instance) running the agent runtime and registered with the orchestrator.",
+  "version": "gd-0.1",
+  "type": "object",
+  "required": ["id", "owner_id", "pubkey", "name", "capabilities", "status", "runtime_version", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Primary key. UUID v4. Stable across reconnects."
+    },
+    "owner_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "User.id of the owner. Cryptographically bound at registration — the owner signs the registration request and the orchestrator records their public key as the identity anchor."
+    },
+    "pubkey": {
+      "type": "string",
+      "description": "Base64url-encoded ed25519 public key used to verify the registration signature.",
+      "pattern": "^[A-Za-z0-9_-]+=*$"
+    },
+    "x25519_pubkey": {
+      "type": ["string", "null"],
+      "description": "Base64url-encoded X25519 public key for E2E payload encryption (WP-16 / gd-0.5). Null until the agent runtime supports encryption. Required for cross-owner tasks after gd-0.5.",
+      "default": null,
+      "pattern": "^[A-Za-z0-9_-]+=*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Human-readable agent name. Shown in the Manager Console fleet view."
+    },
+    "location_tag": {
+      "type": ["string", "null"],
+      "maxLength": 64,
+      "description": "Free-form location label for display and routing hints (e.g. 'home-office', 'collab-locale2', 'aws-us-west-2'). Not used for policy enforcement.",
+      "default": null
+    },
+    "jurisdiction": {
+      "type": ["string", "null"],
+      "maxLength": 8,
+      "description": "ISO 3166-1 alpha-2 country code or region label (e.g. 'US', 'EU'). Used for data-class routing policy enforcement on confidential tasks.",
+      "examples": ["US", "EU", "CA"],
+      "default": null
+    },
+    "capabilities": {
+      "$ref": "#/$defs/AgentCapabilities"
+    },
+    "availability": {
+      "$ref": "#/$defs/AgentAvailability"
+    },
+    "share_policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "Cached summary of active share grants covering this agent. Populated by the orchestrator; agent runtime uses this for local dispatch validation.",
+        "required": ["token_id", "grantee_user_id", "scopes"],
+        "properties": {
+          "token_id": { "type": "string", "format": "uuid" },
+          "grantee_user_id": { "type": "string", "format": "uuid" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "default": []
+    },
+    "status": {
+      "type": "string",
+      "enum": ["idle", "busy", "offline", "degraded", "draining"],
+      "description": "Current operational status. idle=available; busy=executing task; offline=no heartbeat >90s; degraded=circuit-breaker tripped (3 consecutive Ollama failures); draining=completing current task then terminating (spot instances)."
+    },
+    "runtime_version": {
+      "type": "string",
+      "pattern": "^gd-\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version of the installed agent runtime, prefixed with the milestone track.",
+      "examples": ["gd-0.1.0", "gd-0.2.0"]
+    },
+    "last_seen": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Timestamp of the most recent heartbeat received. Null before first heartbeat.",
+      "default": null
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of initial registration."
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Arbitrary key-value metadata (pool membership, cloud instance ID, etc.).",
+      "default": null
+    }
+  },
+  "$defs": {
+    "AgentCapabilities": {
+      "type": "object",
+      "required": ["models", "roles"],
+      "description": "Reported hardware, model, and tool capabilities. Extends Gruper core's per-agent config schema with machine-level fields.",
+      "properties": {
+        "hardware": {
+          "type": "object",
+          "properties": {
+            "cpu_cores": { "type": "integer", "minimum": 1 },
+            "ram_gb":    { "type": "number",  "minimum": 0.5 },
+            "gpu":       { "type": ["string", "null"], "examples": ["RTX 4090 24GB", "A10G 24GB"] },
+            "disk_gb":   { "type": "integer", "minimum": 0 }
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Ollama model tags currently available on this agent, in preference order.",
+          "examples": [["llama3.1:70b", "qwen2.5-coder:32b", "mistral:7b"]]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["code_interpreter", "web_search", "file_read", "file_write", "n8n_webhook", "http_request", "email_send", "slack_post", "vector_store"]
+          },
+          "description": "Tool plugins installed and available for tasks on this agent.",
+          "default": []
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["analyst", "creative", "critic", "synthesizer", "expert", "devil_advocate", "philosopher", "economist", "ethicist", "scientist", "psychologist", "engineer", "custom"]
+          },
+          "minItems": 1,
+          "description": "Gruper core role templates this agent is pre-configured for. Maps directly to the 12 core templates plus 'custom'."
+        }
+      }
+    },
+    "AgentAvailability": {
+      "type": "object",
+      "description": "Owner-configured availability schedule. The orchestrator honors these windows when dispatching tasks from grantees (not from the owner).",
+      "properties": {
+        "always_on": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, availability windows are ignored. Appropriate for always-on mini-PCs and cloud instances."
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(-[A-Z][a-z]{2})? \\d{2}:\\d{2}-\\d{2}:\\d{2} [A-Za-z/_]+$"
+          },
+          "description": "Availability windows in 'DAY[ -DAY] HH:MM-HH:MM IANA/Timezone' format. Grantee tasks are rejected outside these windows.",
+          "examples": [["Mon-Fri 09:00-18:00 America/Chicago", "Sat 10:00-14:00 America/Chicago"]]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "owner_id": "550e8400-e29b-41d4-a716-446655440000",
+      "pubkey": "MCowBQYDK2VwAyEA8xKqR2mLpN3vJoTdHsWfUcYiBzEkAlGnPh5ItCjMuVw=",
+      "x25519_pubkey": null,
+      "name": "Locale2-Workstation",
+      "location_tag": "collab-locale2",
+      "jurisdiction": "US",
+      "capabilities": {
+        "hardware": { "cpu_cores": 16, "ram_gb": 64, "gpu": "RTX 4090 24GB", "disk_gb": 2000 },
+        "models": ["llama3.1:70b", "qwen2.5-coder:32b"],
+        "tools": ["code_interpreter", "web_search", "file_read"],
+        "roles": ["researcher", "data_analyst"]
+      },
+      "availability": {
+        "always_on": false,
+        "windows": ["Mon-Fri 09:00-18:00 America/Chicago"]
+      },
+      "share_policies": [],
+      "status": "idle",
+      "runtime_version": "gd-0.1.0",
+      "last_seen": "2026-06-27T12:00:00Z",
+      "created_at": "2026-06-27T00:00:00Z",
+      "metadata": null
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # Gruper Distributed — Engineering Roadmap
 
-**Status as of 2026-06-27:** `gd-0.0` — **Design stage; no code shipped.**
-· Spec `0.2 — Design Draft` committed · All milestones planned · OQ-1 through OQ-5 must be resolved before `gd-0.1` closes · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
+**Status as of 2026-06-28:** `gd-0.1` — **Wire contracts in progress; WP-01 underway.**
+· Spec committed · All milestones planned · OQ-1 and OQ-2 resolved · Wire contracts package (`spec/contracts/`) committed · OQ-3 through OQ-5 deferred to later WPs · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
 
 **Stack:** Agent Runtime — Python + FastAPI; Rust for security-critical paths · Manager Console — Tauri v2 + Svelte 5 + Tailwind · Orchestrator — FastAPI + PostgreSQL (Docker Compose) · Transport — WSS over TLS · Inference — Ollama local-first · Containers — Docker multi-arch (CPU + CUDA)
 
@@ -23,7 +23,7 @@
 
 | Phase | Milestone | Goal | Status |
 |-------|-----------|------|--------|
-| 0 — Foundations | `gd-0.1` | Wire contracts, schemas, skeleton orchestrator | 🔲 Not started |
+| 0 — Foundations | `gd-0.1` | Wire contracts, schemas, skeleton orchestrator | 🔄 In progress |
 | 1 — Walking Skeleton | `gd-0.2` | Single-owner end-to-end relay over the public internet | 🔲 Not started |
 | 2 — Cross-Network Sharing | `gd-0.3` | Cross-owner dispatch with scoped tokens; headline milestone | 🔲 Not started |
 | 3 — Cloud Burst | `gd-0.4` | AWS spot fleet with hard cost controls | 🔲 Not started |
@@ -34,21 +34,23 @@
 
 ---
 
-## Phase 0 — Foundations — 🔲 `gd-0.1`
+## Phase 0 — Foundations — 🔄 `gd-0.1`
 
-### WP-01 — Wire Contracts & Schema Freeze — 🔲 `gd-0.1`
+### WP-01 — Wire Contracts & Schema Freeze — 🔄 `gd-0.1`
 
 - **Goal:** Lock every interface downstream WPs build against.
 - **Steps:**
-  1. Define the **agent ↔ orchestrator WSS message schema**: `register`, `heartbeat`, `task-push`, `progress-stream`, `result`, `revoke` — typed, versioned, documented.
-  2. Define the **console ↔ orchestrator REST/WS API** (OpenAPI 3.1): task submit, agent query, token mint/revoke, event stream.
-  3. Map **Gruper core's per-agent config schema** (model, temperature, top-p, top-k, repeat penalty, max tokens, context length, role template) to the distributed task input schema.
-  4. Define all data models in versioned JSON Schema or Pydantic: `User`, `Agent`, `Task`, `ShareToken`, `Event`.
-  5. Resolve **OQ-1** (agent-loop framework) to freeze the task/state schema.
-  6. Resolve **OQ-2** (Pattern A sign-off) to confirm the multi-tenant orchestrator model.
-  7. Publish the `gd-0.1` schema package: OpenAPI YAML, WSS schema JSON, ER diagram.
-- **Dependencies:** OQ-1 and OQ-2 must be resolved before this WP closes.
+  1. ✅ Define the **agent ↔ orchestrator WSS message schema**: `register`, `heartbeat`, `task-push`, `progress-stream`, `result`, `revoke` — typed, versioned, documented. → `spec/contracts/wss-messages.schema.json`
+  2. ✅ Define the **console ↔ orchestrator REST/WS API** (OpenAPI 3.1): task submit, agent query, token mint/revoke, event stream. → `spec/contracts/openapi.yaml`
+  3. ✅ Map **Gruper core's per-agent config schema** (model, temperature, top-p, top-k, repeat penalty, max tokens, context length, role template) to the distributed task input schema. → `spec/contracts/core-mapping.md`
+  4. ✅ Define all data models in versioned JSON Schema: `User`, `Agent`, `Task`, `ShareToken`, `Event`. → `spec/contracts/models/`
+  5. ✅ Resolve **OQ-1** (agent-loop framework) → **Custom ReAct implementation**, consistent with Gruper core's philosophy.
+  6. ✅ Resolve **OQ-2** (Pattern A sign-off) → **Pattern A — shared multi-tenant orchestrator** for the first release.
+  7. 🔲 Independent review pass and WP-02 team confirmation before closing.
+- **Dependencies:** OQ-1 and OQ-2 resolved.
 - **Exit gate:** Schemas agreed and published. An independent implementer can build against them without reopening architecture decisions.
+
+**Notes (2026-06-28):** Contracts package committed. `spec/contracts/` contains OpenAPI 3.1 YAML (all REST and WebSocket endpoints), WSS message schema (6 agent→orchestrator + 5 orchestrator→agent + 5 orchestrator→console message types), 5 versioned JSON Schema data models, core parameter mapping doc, and package README. OQ-1 and OQ-2 resolved. Pending: independent review and WP-02 implementation confirmation.
 
 ---
 
@@ -435,6 +437,6 @@ Not assigned to any phase or work packet. Long-term items to keep in mind for la
 
 ---
 
-*Last updated: 2026-06-27*
+*Last updated: 2026-06-28*
 *Companion document: `GruperDistributedSpec.md` — architecture diagrams, data models, wire schemas, security threat table, and open questions (OQ-1…OQ-5).*
 *Gruper core baseline: `v0.4.5` (`Gruper.html`) — this roadmap builds on core, not over it.*

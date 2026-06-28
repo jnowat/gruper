@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gruper.dev/schemas/gd-0.1/user.json",
+  "title": "User",
+  "description": "Gruper Distributed user identity record. Each user has a root ed25519 keypair that cryptographically anchors their agents and share tokens.",
+  "version": "gd-0.1",
+  "type": "object",
+  "required": ["id", "pubkey", "display_name", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Primary key. UUID v4."
+    },
+    "pubkey": {
+      "type": "string",
+      "description": "Base64url-encoded ed25519 public key. Identity anchor for all agents and tokens created by this user.",
+      "pattern": "^[A-Za-z0-9_-]+=*$",
+      "minLength": 43,
+      "maxLength": 88
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Human-readable display name shown in the Manager Console and audit log."
+    },
+    "org_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Optional organization affiliation. Reserved for multi-org support in gd-1.x.",
+      "default": null
+    },
+    "recovery_method": {
+      "type": ["string", "null"],
+      "enum": ["oauth_google", "oauth_github", "backup_key", null],
+      "description": "Optional key recovery mechanism. Null = keypair-only (no recovery if key lost).",
+      "default": null
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of account creation."
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Arbitrary key-value metadata for future extensibility.",
+      "default": null
+    }
+  },
+  "examples": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "pubkey": "MCowBQYDK2VwAyEA4vt7G9n3iV8gH0qWzpRxLmNbKo2sYjCdUfEhPIkTl3w=",
+      "display_name": "Prime User",
+      "org_id": null,
+      "recovery_method": null,
+      "created_at": "2026-06-27T00:00:00Z",
+      "metadata": null
+    }
+  ]
+}
