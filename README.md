@@ -209,18 +209,20 @@ curl -LO https://github.com/jnowat/gruper/releases/latest/download/Gruper.html
 # or just clone the repo and open Gruper.html
 ```
 
-**Gruper Console (Manager Console)** — Windows installer will be available here once
-WP-05 ships the first buildable scaffold. The CI workflow is already in place:
+**Gruper Console (Manager Console)** — the Tauri v2 desktop app is being built in WP-05.
+The Windows CI workflow is already wired up and will build automatically once the console
+is scaffolded. Until then, the workflow exits cleanly with a notice rather than failing.
 
 | Platform | Installer | Status |
 |----------|-----------|--------|
-| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — [workflow](.github/workflows/build-windows.yml) ready |
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — [workflow ready](.github/workflows/build-windows.yml) |
 | macOS | `.dmg` | Planned — WP-05 |
 | Linux | `.AppImage` / `.deb` | Planned — WP-05 |
 
-Pre-release builds (unsigned) will be attached to [GitHub Releases](https://github.com/jnowat/gruper/releases)
-on every version tag. All pre-v1 builds carry a Windows SmartScreen warning — this is expected
-and will be resolved with a code-signing certificate before v1.0.
+Once available, pre-release builds (unsigned) will be attached to
+[GitHub Releases](https://github.com/jnowat/gruper/releases) on every version tag.
+All pre-v1 builds carry a Windows SmartScreen "Unknown publisher" warning — expected
+until a code-signing certificate is added before v1.0.
 
 ---
 

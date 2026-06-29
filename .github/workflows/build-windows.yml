@@ -1,17 +1,19 @@
 name: Build Windows Installer
 
 # Triggers:
-#   - Push to main: builds and uploads installers as workflow artifacts (CI smoke check).
-#   - Version tag (v*): builds, uploads artifacts, AND creates a draft GitHub Release
-#     with the .exe and .msi attached. Publish the draft manually after reviewing.
+#   - Push to main: build and upload installers as workflow artifacts.
+#   - Version tag (v*): build, upload artifacts, AND create a draft GitHub Release.
+#     Publish the draft manually after reviewing.
+#
+# NOTE: The console/ Tauri project is scaffolded in WP-05. Until then this
+# workflow exits cleanly with an explanatory notice rather than failing.
 on:
   push:
     branches: [main]
     tags:
       - 'v*'
 
-# One build per branch/tag at a time. A new push cancels an in-progress build
-# on the same ref, preventing artifact races on rapid commits to main.
+# Cancel an in-progress build on the same ref when a new push arrives.
 concurrency:
   group: build-windows-${{ github.ref }}
   cancel-in-progress: true
@@ -21,8 +23,7 @@ jobs:
     name: Windows x64 — NSIS (.exe) + WiX (.msi)
     runs-on: windows-latest
 
-    # contents:write is required for tauri-action to create/update a GitHub Release.
-    # It is a no-op for branch-push builds.
+    # contents:write lets tauri-action create/update a GitHub Release on tag builds.
     permissions:
       contents: write
 
@@ -30,59 +31,91 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Frontend toolchain ──────────────────────────────────────────────────
+      # ── Readiness check ──────────────────────────────────────────────────────
+      # Gate the entire build on the presence of console/src-tauri/tauri.conf.json
+      # and console/package.json. Both are created by WP-05.
+      # Steps guarded with `if: steps.readiness.outputs.ready == 'true'` are skipped
+      # silently when the console is not yet scaffolded; the job still passes.
+      - name: Check console project readiness
+        id: readiness
+        shell: bash
+        run: |
+          if [[ -f "console/src-tauri/tauri.conf.json" && -f "console/package.json" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Console project found — proceeding with build."
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Build skipped::console/src-tauri/tauri.conf.json not found."
+            echo "::notice title=Build skipped::The Manager Console (WP-05) has not been scaffolded yet."
+            echo "::notice title=Build skipped::This workflow activates automatically once WP-05 lands."
+          fi
+
+      # ── Frontend toolchain ───────────────────────────────────────────────────
+      # setup-node's built-in npm cache requires package-lock.json to exist, which
+      # it won't until WP-05. Cache it manually after the readiness check instead.
 
       - name: Set up Node.js 20
+        if: steps.readiness.outputs.ready == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          # cache: requires console/package-lock.json — available once WP-05 scaffolds the console.
-          cache: npm
-          cache-dependency-path: console/package-lock.json
 
-      # ── Rust toolchain ──────────────────────────────────────────────────────
+      - name: Cache npm dependencies
+        if: steps.readiness.outputs.ready == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-windows-${{ hashFiles('console/package-lock.json') }}
+          restore-keys: npm-windows-
+
+      # ── Rust toolchain ───────────────────────────────────────────────────────
 
       - name: Set up Rust stable (x86_64-pc-windows-msvc)
+        if: steps.readiness.outputs.ready == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      # Cache compiled Rust crates. The cache key includes the Cargo.lock hash so
-      # it invalidates on any dependency update. Cold builds take ~15–25 min;
-      # warm cache cuts that to under 3 min.
+      # Cold Rust builds take 15–25 min; a warm cache cuts that to under 3 min.
+      # The cache key includes Cargo.lock so it invalidates on any dep update.
       - name: Cache Rust build artifacts
+        if: steps.readiness.outputs.ready == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: console/src-tauri -> target
 
-      # ── Build ───────────────────────────────────────────────────────────────
+      # ── Build ────────────────────────────────────────────────────────────────
 
       - name: Install frontend dependencies
+        if: steps.readiness.outputs.ready == 'true'
         run: npm ci
         working-directory: console
 
       - name: Build Tauri app (Windows x64)
+        if: steps.readiness.outputs.ready == 'true'
+        id: tauri_build
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           # ── Code signing (placeholder — unsigned for pre-v1 builds) ──────────
           #
-          # Without a certificate, Windows Defender SmartScreen shows an
-          # "Unknown publisher" warning on first run. That is acceptable for
-          # pre-v1 internal testing. Enable signing before any public release.
+          # Without a certificate Windows SmartScreen shows an "Unknown publisher"
+          # warning on first run. This is acceptable for pre-v1 internal testing.
+          # Enable signing before any public release.
           #
-          # To add a self-signed certificate for development:
+          # Self-signed certificate (dev/testing only):
           #   1. Generate a PFX:
           #        openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
           #          -days 365 -nodes -subj "/CN=Gruper Dev"
           #        openssl pkcs12 -export -out cert.pfx \
           #          -inkey key.pem -in cert.pem -passout pass:changeme
-          #   2. Base64-encode it and store as a repository secret:
-          #        base64 -w 0 cert.pfx   → copy output → TAURI_SIGNING_PRIVATE_KEY
-          #   3. Store the export password as: TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          #   2. Base64-encode it:
+          #        base64 -w 0 cert.pfx
+          #      Copy the output → repository secret TAURI_SIGNING_PRIVATE_KEY
+          #   3. Add the export password → secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           #
-          # For production (EV certificate from DigiCert / Sectigo / GlobalSign):
+          # Production (EV certificate from DigiCert / Sectigo / GlobalSign):
           #   Follow the vendor's signing documentation, then set the same two secrets.
           #
           # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -91,29 +124,50 @@ jobs:
         with:
           projectPath: console
 
-          # Build both installer types:
-          #   nsis → portable NSIS installer (.exe) — simpler install, no admin required
-          #   msi  → WiX-based MSI installer (.msi) — required by enterprise IT and
-          #          Group Policy software deployment
+          # nsis → NSIS installer (.exe) — simpler install, no admin rights required
+          # msi  → WiX MSI installer (.msi) — required by enterprise IT / Group Policy
           args: --target x86_64-pc-windows-msvc --bundles nsis,msi
 
-          # Release settings — only takes effect when triggered by a version tag.
-          # For branch-push builds, tagName resolves to '' and no release is created.
+          # tagName is non-empty only on version-tag pushes; tauri-action skips
+          # release creation when tagName is an empty string (branch-push builds).
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: Gruper Console ${{ github.ref_name }}
           releaseBody: |
             See [ROADMAP.md](https://github.com/jnowat/gruper/blob/main/ROADMAP.md) for what changed.
 
             > **Pre-release:** Gruper Distributed is pre-v1. These builds are for
-            > testing only. Unsigned — Windows SmartScreen will warn on first run.
-          releaseDraft: true    # always draft; publish manually after reviewing
-          prerelease: true      # all gd-0.x builds are pre-releases
+            > testing only. Binaries are unsigned — Windows SmartScreen will show
+            > an "Unknown publisher" warning on first run.
+          releaseDraft: true   # always create as draft; publish manually after reviewing
+          prerelease: true     # all gd-0.x builds are pre-releases
 
-      # ── Artifact upload ─────────────────────────────────────────────────────
+      # ── Debug output on failure ──────────────────────────────────────────────
+      # Runs only when a build step fails; collects environment info to help
+      # diagnose toolchain or config issues.
+
+      - name: Debug info (on failure)
+        if: steps.readiness.outputs.ready == 'true' && failure()
+        shell: bash
+        run: |
+          echo "=== directory listing: console/ ==="
+          ls -la console/ || echo "(console/ not found)"
+          echo "=== directory listing: console/src-tauri/ ==="
+          ls -la console/src-tauri/ || echo "(src-tauri/ not found)"
+          echo "=== Rust toolchain ==="
+          rustup show
+          rustup target list --installed
+          echo "=== Node / npm ==="
+          node --version
+          npm --version
+          echo "=== tauri info ==="
+          cd console && npx tauri info || true
+
+      # ── Artifact upload ──────────────────────────────────────────────────────
       # Artifacts are available on the Actions run summary for 30 days.
-      # On tag builds they are also attached to the GitHub Release draft above.
+      # On tag builds they are also attached to the draft GitHub Release above.
 
       - name: Upload NSIS installer (.exe)
+        if: steps.readiness.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gruper-console-${{ github.ref_name }}-windows-x64-setup.exe
@@ -122,9 +176,44 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload MSI installer
+        if: steps.readiness.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: gruper-console-${{ github.ref_name }}-windows-x64.msi
           path: console/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
           retention-days: 30
           if-no-files-found: warn
+
+      # ── Job summary ──────────────────────────────────────────────────────────
+      # Always runs; writes a human-readable status to the Actions run summary page.
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.readiness.outputs.ready }}" != "true" ]]; then
+            cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          ### Build skipped — console not yet scaffolded
+
+          `console/src-tauri/tauri.conf.json` was not found.
+          The Manager Console Tauri project is created in **WP-05**.
+          This workflow will build automatically once that lands.
+
+          **What to do:** nothing — this is expected during pre-WP-05 development.
+          EOF
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          ### Build complete
+
+          | Artifact | Format | Notes |
+          |----------|--------|-------|
+          | `*-setup.exe` | NSIS installer | No admin rights required |
+          | `*.msi` | WiX MSI | Enterprise / Group Policy compatible |
+
+          Artifacts are attached to this workflow run (30-day retention).
+          EOF
+            if [[ "${{ github.ref_type }}" == "tag" ]]; then
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "Draft release created for tag \`${{ github.ref_name }}\` — publish manually when ready." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
