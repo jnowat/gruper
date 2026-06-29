@@ -204,25 +204,28 @@ Full detail in [ROADMAP.md](ROADMAP.md).
 **Gruper Core** is a single file — no installer needed:
 
 ```bash
-# Latest release
-curl -LO https://github.com/jnowat/gruper/releases/latest/download/Gruper.html
-# or just clone the repo and open Gruper.html
+# Clone and open directly
+git clone https://github.com/jnowat/gruper.git
+open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
 ```
 
-**Gruper Console (Manager Console)** — the Tauri v2 desktop app is being built in WP-05.
-The Windows CI workflow is already wired up and will build automatically once the console
-is scaffolded. Until then, the workflow exits cleanly with a notice rather than failing.
+**Gruper Console (Manager Console)** — the Windows CI workflow runs on every push
+and always produces at least one downloadable artifact:
 
-| Platform | Installer | Status |
-|----------|-----------|--------|
-| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — [workflow ready](.github/workflows/build-windows.yml) |
+| State | Artifact | How to get it |
+|-------|----------|---------------|
+| Pre-WP-05 (now) | `BUILD-STATUS.txt` — explains current state | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
+| Post-WP-05 | `*-setup.exe` (NSIS) + `*.msi` (WiX) | Same link, or [GitHub Releases](https://github.com/jnowat/gruper/releases) on tagged builds |
+
+| Platform | Format | Status |
+|----------|--------|--------|
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — workflow active |
 | macOS | `.dmg` | Planned — WP-05 |
 | Linux | `.AppImage` / `.deb` | Planned — WP-05 |
 
-Once available, pre-release builds (unsigned) will be attached to
-[GitHub Releases](https://github.com/jnowat/gruper/releases) on every version tag.
-All pre-v1 builds carry a Windows SmartScreen "Unknown publisher" warning — expected
-until a code-signing certificate is added before v1.0.
+Pre-release builds are unsigned — Windows SmartScreen will show an "Unknown publisher"
+warning on first run. This is expected and will be resolved with a code-signing
+certificate before v1.0.
 
 ---
 
