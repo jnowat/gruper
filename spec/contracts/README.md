@@ -1,7 +1,7 @@
 # Gruper Distributed — Wire Contracts Package
 
 **Milestone:** `gd-0.1` — Wire Contracts & Schema Freeze  
-**Status:** 🔄 In progress — schemas drafted; OQ-1 and OQ-2 resolved (see below)  
+**Status:** ✅ Frozen — schemas published; WP-02 built against them with no amendments; OQ-1 and OQ-2 resolved (see below)  
 **Spec version:** `0.2 — Design Draft`
 
 This directory is the **gd-0.1 schema package** — the frozen interface layer that every downstream work packet builds against. An independent implementer can build the orchestrator, agent runtime, and Manager Console from these files without reopening architecture decisions.
