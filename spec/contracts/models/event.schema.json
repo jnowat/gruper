@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gruper.dev/schemas/gd-0.1/event.json",
+  "title": "Event",
+  "description": "Gruper Distributed audit event record. Append-only; never updated or deleted. Hash-chained from gd-0.5 (WP-17) for tamper-evidence. This is the compliance record for LLC recordkeeping, pharma audit trails, observatory run logs, and regulated-industry audits.",
+  "version": "gd-0.1",
+  "type": "object",
+  "required": ["id", "ts", "actor_id", "action", "subject_id"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Primary key. UUID v4. Monotonically increasing by insertion order within the same millisecond (use ts + id for deterministic ordering)."
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of the event. Stored with microsecond precision."
+    },
+    "actor_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "User.id or Agent.id of the entity that triggered this event. For system-generated events (e.g. timeout), the system service UUID is used."
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "task_created",
+        "task_dispatched",
+        "task_progress",
+        "task_complete",
+        "task_failed",
+        "task_timed_out",
+        "task_dead_lettered",
+        "task_revoked",
+        "token_minted",
+        "token_imported",
+        "token_used",
+        "token_revoked",
+        "token_expired",
+        "agent_registered",
+        "agent_heartbeat",
+        "agent_offline",
+        "agent_degraded",
+        "agent_recovered",
+        "agent_draining",
+        "agent_terminated",
+        "delegation_created",
+        "delegation_dispatched",
+        "delegation_complete",
+        "pool_created",
+        "pool_drain_signaled",
+        "pool_stopped",
+        "user_created",
+        "auth_token_issued",
+        "auth_token_refreshed"
+      ],
+      "description": "Machine-readable event type. All state transitions for tasks, agents, tokens, and users produce audit events."
+    },
+    "subject_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID of the primary affected resource: Task.id, Agent.id, ShareToken.id, User.id, or Pool.id depending on action."
+    },
+    "secondary_subject_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "UUID of a secondary affected resource where applicable (e.g. for task_dispatched: the assigned Agent.id; for token_used: the Task.id).",
+      "default": null
+    },
+    "payload_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex hash of the event's associated payload content. For task events: hash of the task input blob (never plaintext content). For auth events: hash of the token claims. Null if no payload.",
+      "default": null
+    },
+    "prev_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "entry_hash of the immediately preceding event in the append-only chain. Null for the first event and for all events before gd-0.5 (WP-17). When non-null, a gap or mismatch indicates tampering.",
+      "default": null
+    },
+    "entry_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex hash of this event, computed as: SHA-256(ts ‖ actor_id ‖ action ‖ subject_id ‖ payload_hash ‖ prev_hash). All fields encoded as UTF-8 strings, concatenated with '|' as separator. Null for events created before gd-0.5 (WP-17). A verifier checks: entry_hash == SHA-256(computed value) AND prev_hash == entry_hash of preceding record.",
+      "default": null
+    },
+    "metadata": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Non-sensitive structured metadata for the event. Examples: {'model': 'llama3.1:70b', 'duration_ms': 4200} for task_complete; {'reason': 'quota_exceeded'} for task_revoked. Never contains payload content or PII.",
+      "default": null
+    }
+  },
+  "$defs": {
+    "HashChainNote": {
+      "description": "Hash chain computation details (informational, not a schema field).",
+      "type": "object",
+      "properties": {
+        "algorithm": { "type": "string", "const": "SHA-256" },
+        "separator": { "type": "string", "const": "|" },
+        "field_order": {
+          "type": "array",
+          "items": { "type": "string" },
+          "const": ["ts", "actor_id", "action", "subject_id", "payload_hash", "prev_hash"]
+        },
+        "null_encoding": { "type": "string", "const": "empty string" },
+        "note": { "type": "string", "const": "Implemented at gd-0.5 (WP-17). Pre-gd-0.5 events have prev_hash=null and entry_hash=null. The chain begins from the first event after WP-17 closes." }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "c8d9e0f1-2a3b-4c5d-6e7f-8a9b0c1d2e3f",
+      "ts": "2026-06-27T12:00:01.000000Z",
+      "actor_id": "550e8400-e29b-41d4-a716-446655440000",
+      "action": "task_created",
+      "subject_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "secondary_subject_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "payload_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "prev_hash": null,
+      "entry_hash": null,
+      "metadata": {
+        "data_class": "internal",
+        "priority": 50
+      }
+    },
+    {
+      "id": "d9e0f1a2-3b4c-5d6e-7f8a-9b0c1d2e3f4a",
+      "ts": "2026-06-27T12:00:05.123456Z",
+      "actor_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "action": "task_dispatched",
+      "subject_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "secondary_subject_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "payload_hash": null,
+      "prev_hash": "a1b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890",
+      "entry_hash": "b2c3d4e5f67890abcdef1234567890a1b2c3d4e5f67890abcdef1234567890a1",
+      "metadata": {
+        "model_requested": "llama3.1:70b",
+        "queue_wait_ms": 4123
+      }
+    }
+  ]
+}

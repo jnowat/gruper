@@ -1,0 +1,1401 @@
+openapi: "3.1.0"
+
+info:
+  title: Gruper Distributed Orchestrator API
+  description: |
+    REST and WebSocket API for the Gruper Distributed orchestrator.
+    Consumed by: Manager Console (Tauri/Svelte), agent runtimes, and CLI tooling.
+
+    **Versioning:** This spec tracks milestone `gd-0.1`. Breaking changes increment the
+    milestone version. All endpoints are prefixed with `/v1`.
+
+    **Authentication:** All requests (except `GET /health`) require a Bearer JWT in the
+    `Authorization` header. JWTs are issued by `POST /auth/token` and signed with the
+    orchestrator's ed25519 key. Agent registration additionally requires an ed25519
+    signature over the registration payload.
+
+    **WebSocket endpoints** are documented with `x-protocol: websocket`. The initial HTTP
+    upgrade request is authenticated identically to REST (Bearer token in
+    `Authorization` header). After upgrade, the connection speaks the JSON message
+    protocol defined in `wss-messages.schema.json`.
+  version: gd-0.1.0
+  contact:
+    name: Gruper Distributed
+    url: https://gruper.dev
+
+servers:
+  - url: https://orchestrator.gruper.dev/v1
+    description: Production orchestrator (Pattern A — shared multi-tenant)
+  - url: http://localhost:8080/v1
+    description: Local development / self-hosted
+
+tags:
+  - name: system
+    description: Health and diagnostics
+  - name: auth
+    description: Authentication and token issuance
+  - name: agents
+    description: Agent registration and fleet management
+  - name: console
+    description: Manager Console WebSocket connection
+  - name: tasks
+    description: Task submission, polling, and lifecycle
+  - name: tokens
+    description: Share token minting and revocation
+  - name: audit
+    description: Append-only audit event log
+  - name: pools
+    description: Cloud agent pool management (WP-13 / gd-0.4)
+  - name: metrics
+    description: Operational metrics
+
+paths:
+
+  # ── System ────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      description: Returns orchestrator liveness. No auth required. Suitable for load-balancer probes.
+      tags: [system]
+      responses:
+        "200":
+          description: Orchestrator is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Orchestrator is degraded or starting up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+
+  /auth/token:
+    post:
+      operationId: issueAuthToken
+      summary: Issue authentication token
+      description: |
+        Exchanges a signed challenge for a short-lived JWT. The client signs a
+        server-issued challenge with their ed25519 private key. The orchestrator
+        verifies the signature against the stored User.pubkey and returns a JWT.
+
+        Emits `auth_token_issued` audit event.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTokenRequest"
+      responses:
+        "200":
+          description: JWT issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /auth/token/refresh:
+    post:
+      operationId: refreshAuthToken
+      summary: Refresh authentication token
+      description: |
+        Issues a new JWT using a still-valid existing JWT. Sliding window refresh —
+        each call resets the TTL. Emits `auth_token_refreshed` audit event.
+      tags: [auth]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: New JWT issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Agents ────────────────────────────────────────────────────────────────
+
+  /agents:
+    get:
+      operationId: listAgents
+      summary: List agents
+      description: |
+        Returns agents visible to the caller. Owner sees all their own agents.
+        Grantees see only agents covered by their active share tokens.
+      tags: [agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [idle, busy, offline, degraded, draining]
+          description: Filter by agent status
+        - name: jurisdiction
+          in: query
+          schema:
+            type: string
+            maxLength: 8
+          description: Filter by jurisdiction (ISO 3166-1 alpha-2 or region label)
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+      responses:
+        "200":
+          description: Paginated agent list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: registerAgent
+      summary: Register a new agent
+      description: |
+        Registers a new agent node with the orchestrator. The request body must
+        include an ed25519 signature over the canonical registration payload
+        (see `AgentRegistrationRequest.signature`). The orchestrator stores the
+        public key as a cryptographic identity anchor.
+
+        After registration the agent should open a WebSocket connection to
+        `GET /agents/ws` to receive tasks and send heartbeats.
+
+        Emits `agent_registered` audit event.
+      tags: [agents]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentRegistrationRequest"
+      responses:
+        "201":
+          description: Agent registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Agent with this pubkey already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /agents/{agent_id}:
+    get:
+      operationId: getAgent
+      summary: Get agent by ID
+      tags: [agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Agent record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    patch:
+      operationId: updateAgent
+      summary: Update agent metadata
+      description: |
+        Allows the agent owner to update mutable fields: `name`, `location_tag`,
+        `jurisdiction`, `availability`. Capabilities are updated via the WebSocket
+        heartbeat, not this endpoint.
+      tags: [agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentUpdateRequest"
+      responses:
+        "200":
+          description: Updated agent record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /agents/ws:
+    get:
+      operationId: agentWebSocket
+      summary: Agent WebSocket connection
+      description: |
+        WebSocket endpoint for agent ↔ orchestrator bidirectional communication.
+        Upgrade this connection after registration. The agent sends `heartbeat`,
+        `task_ack`, `progress`, `result`, and `error` messages. The orchestrator
+        sends `task_push`, `revoke`, `drain`, and `heartbeat_ack` messages.
+
+        See `wss-messages.schema.json` for the full message protocol.
+
+        **Connection lifecycle:**
+        1. Agent opens WSS with `Authorization: Bearer <jwt>` header
+        2. Agent sends `register` message with its UUID
+        3. Orchestrator replies with `registered` confirmation
+        4. Agent sends `heartbeat` every 30 seconds
+        5. Orchestrator marks agent `offline` after 90s without heartbeat
+      tags: [agents]
+      security:
+        - BearerAuth: []
+      x-protocol: websocket
+      responses:
+        "101":
+          description: WebSocket upgrade successful
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Console WebSocket ─────────────────────────────────────────────────────
+
+  /console/ws:
+    get:
+      operationId: consoleWebSocket
+      summary: Manager Console WebSocket connection
+      description: |
+        WebSocket endpoint for the Manager Console (Tauri/Svelte) to receive
+        real-time fleet events, task progress, and queue depth updates.
+
+        The console is a subscriber only — it does not send agent-protocol messages.
+        Message types received: `fleet_event`, `task_progress`, `task_complete`,
+        `token_event`, `queue_depth`.
+
+        See `wss-messages.schema.json` for the full message schema.
+      tags: [console]
+      security:
+        - BearerAuth: []
+      x-protocol: websocket
+      responses:
+        "101":
+          description: WebSocket upgrade successful
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Tasks ─────────────────────────────────────────────────────────────────
+
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: List tasks
+      description: |
+        Returns tasks visible to the caller. Owner sees tasks submitted to their agents.
+        Grantees see tasks they submitted under an active share token.
+      tags: [tasks]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, dispatched, running, complete, failed, timed_out, dead_letter]
+          description: Filter by task status
+        - name: assigned_agent_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by assigned agent
+        - name: submitter_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by submitter (owners only — grantees always filtered to self)
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+      responses:
+        "200":
+          description: Paginated task list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: submitTask
+      summary: Submit a task
+      description: |
+        Submits a new task for execution on a specified agent. The orchestrator
+        validates the caller's authorization (ownership or share token), enforces
+        quotas and scope constraints, and enqueues the task.
+
+        **Idempotency:** If `correlation_id` is provided and a task with the same
+        `correlation_id` already exists for this submitter, the existing task record
+        is returned (HTTP 200) rather than creating a new one.
+
+        Emits `task_created` audit event. `task_dispatched` emitted when the agent
+        acknowledges via WebSocket.
+      tags: [tasks]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskSubmitRequest"
+      responses:
+        "201":
+          description: Task created and enqueued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "200":
+          description: Duplicate correlation_id — existing task returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          description: Quota exceeded (max_concurrent_tasks or max_tasks_total reached)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tasks/{task_id}:
+    get:
+      operationId: getTask
+      summary: Get task by ID
+      description: |
+        Returns the task record. `result` and `logs_ref` are conditionally populated
+        based on the caller's `result_visibility` grant (full / output_only / none).
+      tags: [tasks]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tasks/{task_id}/revoke:
+    post:
+      operationId: revokeTask
+      summary: Revoke a task
+      description: |
+        Signals the orchestrator to stop dispatching or abort the in-flight task.
+        Only the task submitter or the agent owner may revoke. For tasks in
+        `running` state, the orchestrator sends a `revoke` WebSocket message to
+        the agent.
+
+        Emits `task_revoked` audit event.
+      tags: [tasks]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 256
+                  description: Human-readable revocation reason stored in audit metadata
+      responses:
+        "200":
+          description: Task revoked; updated record returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Task is already in a terminal state (complete, failed, dead_letter)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Share Tokens ──────────────────────────────────────────────────────────
+
+  /tokens:
+    get:
+      operationId: listTokens
+      summary: List share tokens
+      description: |
+        Returns share tokens created by the caller (`created_by`) and tokens
+        granted to the caller (`grantee_user_id`).
+      tags: [tokens]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: role
+          in: query
+          schema:
+            type: string
+            enum: [issued, received]
+          description: Filter to tokens issued by or received by the caller
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+          description: Filter by active status
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+      responses:
+        "200":
+          description: Paginated share token list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: mintToken
+      summary: Mint a share token
+      description: |
+        Creates a new share token granting a specified user (`grantee_user_id`)
+        scoped access to one or more of the caller's agents. The orchestrator
+        issues a JWT (`token_string`) returned only in this response — it is not
+        re-derivable from the database record.
+
+        All `agent_ids` must be owned by the caller. `expires_at` must be within
+        90 days of the request.
+
+        Emits `token_minted` audit event.
+      tags: [tokens]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenMintRequest"
+      responses:
+        "201":
+          description: Token minted. `token_string` is populated — store it now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /tokens/{token_id}:
+    get:
+      operationId: getToken
+      summary: Get share token by ID
+      tags: [tokens]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TokenId"
+      responses:
+        "200":
+          description: Share token record (`token_string` is null after initial mint response)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      operationId: revokeToken
+      summary: Revoke a share token
+      description: |
+        Revokes the share token immediately. The orchestrator stops accepting new
+        task dispatches under this token within one dispatch cycle. In-flight tasks
+        receive a `revoke` signal.
+
+        Only the token issuer (`created_by`) may revoke. Sets `revoked_at` and
+        `is_active = false`.
+
+        Emits `token_revoked` audit event.
+      tags: [tokens]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TokenId"
+      responses:
+        "200":
+          description: Token revoked; updated record returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Token is already revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /tokens/import:
+    post:
+      operationId: importToken
+      summary: Import a share token (grantee)
+      description: |
+        Allows the grantee to register a `token_string` (JWT) they received from
+        a token issuer. The orchestrator validates the JWT, checks expiry and
+        revocation status, and associates it with the grantee's account.
+
+        Increments `import_count` on the token record.
+
+        Emits `token_imported` audit event.
+      tags: [tokens]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token_string]
+              properties:
+                token_string:
+                  type: string
+                  description: Compact JWT string received from the token issuer
+      responses:
+        "200":
+          description: Token imported successfully; share token record returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareToken"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  # ── Audit ─────────────────────────────────────────────────────────────────
+
+  /audit:
+    get:
+      operationId: listAuditEvents
+      summary: Query audit event log
+      description: |
+        Returns audit events visible to the caller. All events are immutable after
+        creation. From gd-0.5 (WP-17), each event includes `prev_hash` and
+        `entry_hash` for tamper-evidence verification.
+
+        Results are ordered by `ts` ascending (oldest first) by default.
+      tags: [audit]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          schema:
+            type: string
+          description: Filter by event action (e.g. `task_created`, `token_minted`)
+        - name: subject_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by primary subject UUID
+        - name: actor_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Filter by actor UUID
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Lower bound on `ts` (inclusive)
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Upper bound on `ts` (exclusive)
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+      responses:
+        "200":
+          description: Paginated audit event list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ── Metrics ───────────────────────────────────────────────────────────────
+
+  /metrics/queue-depth:
+    get:
+      operationId: getQueueDepth
+      summary: Current queue depth
+      description: Returns per-agent and aggregate task queue depths. Useful for Manager Console fleet view.
+      tags: [metrics]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Queue depth snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueDepthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ── Pools (WP-13 / gd-0.4) ───────────────────────────────────────────────
+
+  /pools:
+    post:
+      operationId: createPool
+      summary: Create a cloud agent pool
+      description: |
+        Provisions a cloud agent pool (e.g. AWS EC2 auto-scaling group).
+        Available from gd-0.4 (WP-13). Returns 501 in earlier milestone builds.
+
+        Emits `pool_created` audit event.
+      tags: [pools]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PoolCreateRequest"
+      responses:
+        "201":
+          description: Pool created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pool"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "501":
+          description: Not implemented in this milestone build
+
+  /pools/{pool_id}/drain:
+    post:
+      operationId: drainPool
+      summary: Signal pool drain
+      description: |
+        Initiates a graceful drain of all agents in the pool. Each agent is sent
+        a `drain` WebSocket message and transitions to `draining` status after
+        completing its current task.
+
+        Emits `pool_drain_signaled` audit event.
+      tags: [pools]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: pool_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Drain initiated
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          description: Not implemented in this milestone build
+
+# ── Components ────────────────────────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: ed25519-signed JWT issued by `POST /auth/token`
+
+  parameters:
+    AgentId:
+      name: agent_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Agent UUID
+
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Task UUID
+
+    TokenId:
+      name: token_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Share token UUID
+
+    PageLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+      description: Maximum number of results to return
+
+    PageCursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+      description: Opaque pagination cursor from a previous response's `next_cursor`
+
+  responses:
+    BadRequest:
+      description: Malformed request body or parameters
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: Caller does not have permission for this resource
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnprocessableEntity:
+      description: Request body is structurally valid but semantically rejected
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+
+    # ── Envelope types ───────────────────────────────────────────────────────
+
+    ErrorResponse:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code (e.g. `quota_exceeded`, `token_revoked`)
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured context
+
+    HealthResponse:
+      type: object
+      required: [status, version, uptime_s]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        version:
+          type: string
+          description: Orchestrator runtime version (e.g. `gd-0.1.0`)
+        uptime_s:
+          type: integer
+          description: Seconds since process start
+        agent_count:
+          type: object
+          properties:
+            idle:    { type: integer }
+            busy:    { type: integer }
+            offline: { type: integer }
+
+    # ── Auth ─────────────────────────────────────────────────────────────────
+
+    AuthTokenRequest:
+      type: object
+      required: [user_id, challenge, signature]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: User.id claiming identity
+        challenge:
+          type: string
+          description: Opaque challenge string previously issued by the orchestrator. Challenge issuance is out-of-band for gd-0.1; a dedicated `POST /auth/challenge` endpoint is added in gd-0.2.
+        signature:
+          type: string
+          description: Base64url-encoded ed25519 signature over `SHA-256(challenge)` using User.pubkey
+
+    AuthTokenResponse:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token:
+          type: string
+          description: Compact JWT string
+        expires_at:
+          type: string
+          format: date-time
+          description: JWT expiry timestamp
+
+    # ── Agent ─────────────────────────────────────────────────────────────────
+
+    AgentRegistrationRequest:
+      type: object
+      required: [name, pubkey, capabilities, runtime_version, signature, timestamp]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        pubkey:
+          type: string
+          description: Base64url-encoded ed25519 public key
+          pattern: "^[A-Za-z0-9_-]+=*$"
+        x25519_pubkey:
+          type: string
+          nullable: true
+          description: Base64url-encoded X25519 public key for E2E encryption (optional, required from gd-0.5)
+          pattern: "^[A-Za-z0-9_-]+=*$"
+        capabilities:
+          $ref: "#/components/schemas/AgentCapabilities"
+        availability:
+          $ref: "#/components/schemas/AgentAvailability"
+        location_tag:
+          type: string
+          nullable: true
+          maxLength: 64
+        jurisdiction:
+          type: string
+          nullable: true
+          maxLength: 8
+        runtime_version:
+          type: string
+          pattern: "^gd-\\d+\\.\\d+\\.\\d+$"
+        signature:
+          type: string
+          description: |
+            Base64url-encoded ed25519 signature over the canonical registration
+            payload: `SHA-256(pubkey | name | runtime_version | timestamp)` where
+            `timestamp` is a Unix epoch integer (seconds) included in the request
+            within ±300s of server time.
+        timestamp:
+          type: integer
+          description: Unix epoch seconds. Must be within ±300s of server time to prevent replay.
+
+    AgentUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        location_tag:
+          type: string
+          nullable: true
+          maxLength: 64
+        jurisdiction:
+          type: string
+          nullable: true
+          maxLength: 8
+        availability:
+          $ref: "#/components/schemas/AgentAvailability"
+
+    AgentCapabilities:
+      type: object
+      required: [models, roles]
+      properties:
+        hardware:
+          type: object
+          properties:
+            cpu_cores: { type: integer, minimum: 1 }
+            ram_gb:    { type: number,  minimum: 0.5 }
+            gpu:       { type: string, nullable: true }
+            disk_gb:   { type: integer, minimum: 0 }
+        models:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: Ollama model tags available on this agent
+        tools:
+          type: array
+          items:
+            type: string
+            enum: [code_interpreter, web_search, file_read, file_write, n8n_webhook, http_request, email_send, slack_post, vector_store]
+          default: []
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [analyst, creative, critic, synthesizer, expert, devil_advocate, philosopher, economist, ethicist, scientist, psychologist, engineer, custom]
+          minItems: 1
+
+    AgentAvailability:
+      type: object
+      properties:
+        always_on:
+          type: boolean
+          default: false
+        windows:
+          type: array
+          items: { type: string }
+          description: Availability windows in 'DAY[ -DAY] HH:MM-HH:MM IANA/Timezone' format
+
+    Agent:
+      description: Full agent record as defined in models/agent.schema.json
+      type: object
+      required: [id, owner_id, pubkey, name, capabilities, status, runtime_version, created_at]
+      properties:
+        id:              { type: string, format: uuid }
+        owner_id:        { type: string, format: uuid }
+        pubkey:          { type: string }
+        x25519_pubkey:   { type: string, nullable: true }
+        name:            { type: string }
+        location_tag:    { type: string, nullable: true }
+        jurisdiction:    { type: string, nullable: true }
+        capabilities:
+          $ref: "#/components/schemas/AgentCapabilities"
+        availability:
+          $ref: "#/components/schemas/AgentAvailability"
+        share_policies:  { type: array, items: { type: object } }
+        status:          { type: string, enum: [idle, busy, offline, degraded, draining] }
+        runtime_version: { type: string }
+        last_seen:       { type: string, format: date-time, nullable: true }
+        created_at:      { type: string, format: date-time }
+        metadata:        { type: object, nullable: true, additionalProperties: true }
+
+    AgentListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        total:
+          type: integer
+          description: Total matching records (before pagination)
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for the next page; null if this is the last page
+
+    # ── Task ─────────────────────────────────────────────────────────────────
+
+    TaskSubmitRequest:
+      type: object
+      required: [assigned_agent_id, data_class, input]
+      properties:
+        correlation_id:
+          type: string
+          format: uuid
+          nullable: true
+        assigned_agent_id:
+          type: string
+          format: uuid
+        share_token_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Required when submitting to another owner's agent
+        parent_task_id:
+          type: string
+          format: uuid
+          nullable: true
+        data_class:
+          type: string
+          enum: [public, internal, confidential]
+        input:
+          oneOf:
+            - $ref: "#/components/schemas/TaskInputPlaintext"
+            - $ref: "#/components/schemas/TaskInputEncrypted"
+          discriminator:
+            propertyName: _type
+        allowed_tools:
+          type: array
+          items:
+            type: string
+            enum: [code_interpreter, web_search, file_read, file_write, n8n_webhook, http_request, email_send, slack_post, vector_store]
+          default: []
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 100
+          default: 50
+        deadline:
+          type: string
+          format: date-time
+          nullable: true
+        timeout_s:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 300
+
+    TaskInputPlaintext:
+      type: object
+      required: [_type, prompt]
+      properties:
+        _type:
+          type: string
+          const: plaintext
+        prompt:          { type: string, minLength: 1 }
+        system_prompt:   { type: string, nullable: true }
+        role_template:
+          type: string
+          enum: [analyst, creative, critic, synthesizer, expert, devil_advocate, philosopher, economist, ethicist, scientist, psychologist, engineer, custom]
+          default: analyst
+        model_preferences:
+          $ref: "#/components/schemas/ModelPreferences"
+        input_files:
+          type: array
+          items: { type: object }
+          default: []
+        context:
+          type: object
+          nullable: true
+          additionalProperties: true
+
+    TaskInputEncrypted:
+      type: object
+      required: [_type, encrypted, ephemeral_pubkey, nonce]
+      properties:
+        _type:
+          type: string
+          const: encrypted
+        encrypted:        { type: string, description: Base64url ChaCha20-Poly1305 ciphertext }
+        ephemeral_pubkey: { type: string, description: Base64url X25519 ephemeral public key }
+        nonce:            { type: string, description: Base64url 12-byte nonce }
+
+    ModelPreferences:
+      type: object
+      properties:
+        name:           { type: string, nullable: true }
+        temperature:    { type: number, minimum: 0, maximum: 1 }
+        top_p:          { type: number, minimum: 0, maximum: 1 }
+        top_k:          { type: integer, minimum: 1, maximum: 100 }
+        repeat_penalty: { type: number, minimum: 0.5, maximum: 2.0 }
+        max_tokens:     { type: integer, minimum: 128, maximum: 8192 }
+        context_length: { type: integer, minimum: 512, maximum: 131072 }
+        seed:           { type: integer, nullable: true }
+        stop_sequences: { type: array, items: { type: string }, default: [] }
+
+    Task:
+      description: Full task record as defined in models/task.schema.json
+      type: object
+      required: [id, submitter_id, assigned_agent_id, data_class, input, status, priority, created_at]
+      properties:
+        id:                { type: string, format: uuid }
+        correlation_id:    { type: string, format: uuid, nullable: true }
+        submitter_id:      { type: string, format: uuid }
+        assigned_agent_id: { type: string, format: uuid }
+        parent_task_id:    { type: string, format: uuid, nullable: true }
+        share_token_id:    { type: string, format: uuid, nullable: true }
+        data_class:        { type: string, enum: [public, internal, confidential] }
+        input:             { oneOf: [{ $ref: "#/components/schemas/TaskInputPlaintext" }, { $ref: "#/components/schemas/TaskInputEncrypted" }] }
+        allowed_tools:     { type: array, items: { type: string } }
+        status:            { type: string, enum: [pending, dispatched, running, complete, failed, timed_out, dead_letter] }
+        priority:          { type: integer }
+        deadline:          { type: string, format: date-time, nullable: true }
+        timeout_s:         { type: integer }
+        retry_count:       { type: integer }
+        created_at:        { type: string, format: date-time }
+        dispatched_at:     { type: string, format: date-time, nullable: true }
+        completed_at:      { type: string, format: date-time, nullable: true }
+        result:            { nullable: true, type: object }
+        error:             { nullable: true, type: object }
+        logs_ref:          { type: string, format: uri, nullable: true }
+        cost_cents:        { type: integer, nullable: true }
+        audit_hash:        { type: string, nullable: true }
+
+    TaskListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+        total:       { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    # ── Share Tokens ──────────────────────────────────────────────────────────
+
+    TokenMintRequest:
+      type: object
+      required: [agent_ids, grantee_user_id, scopes, expires_at]
+      properties:
+        agent_ids:
+          type: array
+          items: { type: string, format: uuid }
+          minItems: 1
+        grantee_user_id:
+          type: string
+          format: uuid
+        scopes:
+          type: array
+          items:
+            type: string
+            enum: [research, analysis, writing, code, data_processing, web_search, file_read, n8n_webhook]
+          minItems: 1
+        quotas:
+          type: object
+          properties:
+            max_concurrent_tasks: { type: integer, minimum: 1, default: 2 }
+            max_ram_gb_per_task:  { type: integer, nullable: true }
+            max_wall_time_s:      { type: integer, minimum: 60, maximum: 86400, default: 7200 }
+            max_tasks_total:      { type: integer, nullable: true }
+        conditions:
+          type: object
+          properties:
+            time_windows:           { type: array, items: { type: string } }
+            allowed_data_classes:   { type: array, items: { type: string, enum: [public, internal, confidential] } }
+            jurisdiction_require:   { type: string, nullable: true, maxLength: 8 }
+            require_approval_tools: { type: array, items: { type: string } }
+        result_visibility:
+          type: string
+          enum: [full, output_only, none]
+          default: output_only
+        expires_at:
+          type: string
+          format: date-time
+          description: Maximum 90 days from request time
+
+    ShareToken:
+      description: Full share token record as defined in models/share-token.schema.json
+      type: object
+      required: [id, agent_ids, grantee_user_id, created_by, scopes, expires_at, created_at, is_active]
+      properties:
+        id:               { type: string, format: uuid }
+        agent_ids:        { type: array, items: { type: string, format: uuid } }
+        grantee_user_id:  { type: string, format: uuid }
+        created_by:       { type: string, format: uuid }
+        scopes:           { type: array, items: { type: string } }
+        quotas:           { type: object }
+        conditions:       { type: object }
+        result_visibility:{ type: string, enum: [full, output_only, none] }
+        expires_at:       { type: string, format: date-time }
+        revoked_at:       { type: string, format: date-time, nullable: true }
+        created_at:       { type: string, format: date-time }
+        is_active:        { type: boolean }
+        token_string:     { type: string, nullable: true, description: Populated only in the initial mint response }
+        import_count:     { type: integer }
+        last_used_at:     { type: string, format: date-time, nullable: true }
+
+    TokenListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShareToken"
+        total:       { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    # ── Audit ─────────────────────────────────────────────────────────────────
+
+    AuditEvent:
+      description: Immutable audit event record as defined in models/event.schema.json
+      type: object
+      required: [id, ts, actor_id, action, subject_id]
+      properties:
+        id:                   { type: string, format: uuid }
+        ts:                   { type: string, format: date-time }
+        actor_id:             { type: string, format: uuid }
+        action:               { type: string }
+        subject_id:           { type: string, format: uuid }
+        secondary_subject_id: { type: string, format: uuid, nullable: true }
+        payload_hash:         { type: string, nullable: true, pattern: "^[0-9a-f]{64}$" }
+        prev_hash:            { type: string, nullable: true, pattern: "^[0-9a-f]{64}$" }
+        entry_hash:           { type: string, nullable: true, pattern: "^[0-9a-f]{64}$" }
+        metadata:             { type: object, nullable: true, additionalProperties: true }
+
+    AuditEventListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        total:       { type: integer }
+        next_cursor: { type: string, nullable: true }
+
+    # ── Metrics ───────────────────────────────────────────────────────────────
+
+    QueueDepthResponse:
+      type: object
+      required: [total_pending, total_running, agents]
+      properties:
+        total_pending:
+          type: integer
+          description: Total tasks in pending state across all agents
+        total_running:
+          type: integer
+          description: Total tasks in running or dispatched state
+        agents:
+          type: array
+          items:
+            type: object
+            required: [agent_id, pending, running]
+            properties:
+              agent_id: { type: string, format: uuid }
+              pending:  { type: integer }
+              running:  { type: integer }
+
+    # ── Pools (WP-13 stub) ────────────────────────────────────────────────────
+
+    PoolCreateRequest:
+      type: object
+      required: [name, provider]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        provider:
+          type: string
+          enum: [aws_ec2, local]
+          description: Cloud provider. `local` is a fixed static pool; `aws_ec2` uses auto-scaling (WP-13)
+        min_agents:
+          type: integer
+          minimum: 0
+          default: 0
+        max_agents:
+          type: integer
+          minimum: 1
+          default: 4
+        instance_type:
+          type: string
+          nullable: true
+          description: Cloud instance type (e.g. `g4dn.xlarge`). Required for `aws_ec2` provider.
+
+    Pool:
+      type: object
+      required: [id, name, provider, status, created_at]
+      properties:
+        id:         { type: string, format: uuid }
+        name:       { type: string }
+        provider:   { type: string }
+        status:     { type: string, enum: [running, draining, stopped] }
+        agent_count:{ type: integer }
+        created_at: { type: string, format: date-time }
+
+security:
+  - BearerAuth: []

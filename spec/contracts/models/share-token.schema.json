@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gruper.dev/schemas/gd-0.1/share-token.json",
+  "title": "ShareToken",
+  "description": "Gruper Distributed share token (grant). A cryptographically signed, granularly scoped, instantly revocable authorization allowing a grantee to dispatch tasks to specific agents within defined constraints. Revocation takes effect within one dispatch cycle — no grace period.",
+  "version": "gd-0.1",
+  "type": "object",
+  "required": ["id", "agent_ids", "grantee_user_id", "created_by", "scopes", "expires_at", "created_at", "is_active"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Primary key. UUID v4. Also the `jti` claim in the JWT token string."
+    },
+    "agent_ids": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "minItems": 1,
+      "description": "One or more Agent.id values covered by this grant. All listed agents must be owned by created_by."
+    },
+    "grantee_user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "User.id of the recipient. Only this user may present this token."
+    },
+    "created_by": {
+      "type": "string",
+      "format": "uuid",
+      "description": "User.id of the token owner (must own all agent_ids)."
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["research", "analysis", "writing", "code", "data_processing", "web_search", "file_read", "n8n_webhook"]
+      },
+      "minItems": 1,
+      "description": "Permitted task scope categories. Tasks with tools or types outside this list are rejected before reaching the agent. Explicitly excludes execute_arbitrary, email_external, and other high-impact actions by default."
+    },
+    "quotas": {
+      "$ref": "#/$defs/TokenQuotas"
+    },
+    "conditions": {
+      "$ref": "#/$defs/TokenConditions"
+    },
+    "result_visibility": {
+      "type": "string",
+      "enum": ["full", "output_only", "none"],
+      "default": "output_only",
+      "description": "What the grantee sees of execution detail. full=all logs and tool calls; output_only=final output only (default and recommended for most grants); none=only task status, result fetched separately by owner."
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC expiry. After this timestamp the token is invalid for new dispatches. Maximum 90 days from created_at."
+    },
+    "revoked_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of revocation. Non-null means the token is revoked. The orchestrator stops dispatching immediately on revocation and signals any in-flight task to abort.",
+      "default": null
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Derived field: true if revoked_at is null AND expires_at is in the future. Stored for efficient query without recomputing on every dispatch."
+    },
+    "token_string": {
+      "type": ["string", "null"],
+      "description": "Compact JWT string for grantee import. Returned only at mint time; not re-derivable from the database record. Null after the initial mint response.",
+      "default": null
+    },
+    "import_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Number of times this token has been imported by the grantee. Informational only."
+    },
+    "last_used_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Timestamp of the most recent successful dispatch under this token.",
+      "default": null
+    }
+  },
+  "$defs": {
+    "TokenQuotas": {
+      "type": "object",
+      "description": "Per-grantee resource quotas enforced at enqueue time. Hard limits — not soft suggestions.",
+      "properties": {
+        "max_concurrent_tasks": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Maximum tasks simultaneously in running or dispatched state under this grant."
+        },
+        "max_ram_gb_per_task": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Maximum RAM the agent may allocate for a single task from this grantee. Enforced via cgroup limits.",
+          "default": null
+        },
+        "max_wall_time_s": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400,
+          "default": 7200,
+          "description": "Maximum wall-clock execution time per task (seconds). Overrides the task's own timeout_s if lower."
+        },
+        "max_tasks_total": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Lifetime task count limit for this token. Null = unlimited. Token is auto-revoked when reached.",
+          "default": null
+        }
+      }
+    },
+    "TokenConditions": {
+      "type": "object",
+      "description": "Non-quota constraints on when and how this token may be used.",
+      "properties": {
+        "time_windows": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(-[A-Z][a-z]{2})? \\d{2}:\\d{2}-\\d{2}:\\d{2} [A-Za-z/_]+$"
+          },
+          "description": "Grantee tasks are only accepted within these time windows (owner's local time). Empty array = no time restriction.",
+          "examples": [["Mon-Fri 09:00-18:00 America/Chicago"]],
+          "default": []
+        },
+        "allowed_data_classes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["public", "internal", "confidential"]
+          },
+          "default": ["public", "internal"],
+          "description": "Maximum data classification the grantee may submit. Confidential tasks require explicit grant."
+        },
+        "jurisdiction_require": {
+          "type": ["string", "null"],
+          "maxLength": 8,
+          "description": "If set, tasks from this grantee are only dispatched to agents whose jurisdiction matches this value. Applies even to owned agents in the grant if they are in non-matching jurisdictions.",
+          "examples": ["US"],
+          "default": null
+        },
+        "require_approval_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tools that require explicit operator approval before the agent may invoke them under this grant. Empty = no additional approval gates beyond global policy.",
+          "default": []
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "b7e1c2d3-4f5a-6b7c-8d9e-0f1a2b3c4d5e",
+      "agent_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890"],
+      "grantee_user_id": "660e9500-f30c-52e5-b827-557766551111",
+      "created_by": "550e8400-e29b-41d4-a716-446655440000",
+      "scopes": ["research", "analysis", "writing"],
+      "quotas": {
+        "max_concurrent_tasks": 2,
+        "max_ram_gb_per_task": 16,
+        "max_wall_time_s": 7200,
+        "max_tasks_total": null
+      },
+      "conditions": {
+        "time_windows": ["Mon-Fri 09:00-18:00 America/Chicago"],
+        "allowed_data_classes": ["public", "internal"],
+        "jurisdiction_require": "US",
+        "require_approval_tools": []
+      },
+      "result_visibility": "output_only",
+      "expires_at": "2026-09-25T00:00:00Z",
+      "revoked_at": null,
+      "created_at": "2026-06-27T00:00:00Z",
+      "is_active": true,
+      "token_string": null,
+      "import_count": 1,
+      "last_used_at": "2026-06-27T14:30:00Z"
+    }
+  ]
+}

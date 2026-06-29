@@ -1,0 +1,855 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gruper.dev/schemas/gd-0.1/wss-messages.json",
+  "title": "Gruper Distributed WebSocket Message Protocol",
+  "description": "JSON Schema for all messages exchanged over the two WebSocket channels: (1) Agent ↔ Orchestrator (GET /agents/ws), (2) Orchestrator → Manager Console (GET /console/ws). All messages are JSON objects with a required 'type' discriminator field. Binary frames are not used.",
+  "version": "gd-0.1",
+
+  "$defs": {
+
+    "MessageEnvelope": {
+      "description": "Every message on both WSS channels is wrapped in this envelope.",
+      "type": "object",
+      "required": ["type", "id", "ts"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Message type discriminator. Determines which $defs schema validates 'payload'."
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client-generated UUID for this message. Used for correlating replies (e.g. heartbeat_ack references the heartbeat id)."
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 UTC timestamp at which the sender generated this message."
+        },
+        "payload": {
+          "type": "object",
+          "description": "Message-type-specific payload. See per-type schemas in $defs."
+        }
+      }
+    },
+
+    "AgentToOrchestratorMessages": {
+      "description": "Messages sent by the agent runtime to the orchestrator over /agents/ws.",
+      "oneOf": [
+        { "$ref": "#/$defs/AgentRegisterMessage" },
+        { "$ref": "#/$defs/AgentHeartbeatMessage" },
+        { "$ref": "#/$defs/AgentTaskAckMessage" },
+        { "$ref": "#/$defs/AgentProgressMessage" },
+        { "$ref": "#/$defs/AgentResultMessage" },
+        { "$ref": "#/$defs/AgentErrorMessage" }
+      ]
+    },
+
+    "OrchestratorToAgentMessages": {
+      "description": "Messages sent by the orchestrator to agent runtimes over /agents/ws.",
+      "oneOf": [
+        { "$ref": "#/$defs/OrchestratorRegisteredMessage" },
+        { "$ref": "#/$defs/OrchestratorHeartbeatAckMessage" },
+        { "$ref": "#/$defs/OrchestratorTaskPushMessage" },
+        { "$ref": "#/$defs/OrchestratorRevokeMessage" },
+        { "$ref": "#/$defs/OrchestratorDrainMessage" }
+      ]
+    },
+
+    "OrchestratorToConsoleMessages": {
+      "description": "Messages sent by the orchestrator to the Manager Console over /console/ws.",
+      "oneOf": [
+        { "$ref": "#/$defs/ConsoleFleetEventMessage" },
+        { "$ref": "#/$defs/ConsoleTaskProgressMessage" },
+        { "$ref": "#/$defs/ConsoleTaskCompleteMessage" },
+        { "$ref": "#/$defs/ConsoleTokenEventMessage" },
+        { "$ref": "#/$defs/ConsoleQueueDepthMessage" }
+      ]
+    },
+
+    "AgentRegisterMessage": {
+      "description": "Sent by the agent immediately after WebSocket upgrade to identify itself. The orchestrator replies with 'registered' or closes the connection if the agent_id does not match the Bearer token.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "register" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["agent_id", "runtime_version", "capabilities"],
+          "additionalProperties": false,
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Must match the agent UUID associated with the Bearer token."
+            },
+            "runtime_version": {
+              "type": "string",
+              "pattern": "^gd-\\d+\\.\\d+\\.\\d+$",
+              "description": "Currently running runtime version. Allows orchestrator to detect stale agents."
+            },
+            "capabilities": {
+              "type": "object",
+              "description": "Current agent capabilities snapshot. Reconciled with the registered record — orchestrator updates its stored copy.",
+              "properties": {
+                "models": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Currently available Ollama model tags (may differ from registered record if models were added/removed)."
+                },
+                "tools": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "roles": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "hardware": {
+                  "type": "object",
+                  "properties": {
+                    "cpu_cores": { "type": "integer" },
+                    "ram_gb":    { "type": "number" },
+                    "gpu":       { "type": ["string", "null"] },
+                    "disk_gb":   { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "AgentHeartbeatMessage": {
+      "description": "Sent by the agent every 30 seconds. The orchestrator marks the agent 'offline' if no heartbeat is received within 90 seconds. Includes current status and in-flight task count so the fleet view stays accurate without polling.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "heartbeat" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["agent_id", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "status": {
+              "type": "string",
+              "enum": ["idle", "busy", "degraded", "draining"],
+              "description": "Current agent status. 'offline' is not reported by the agent — it is inferred by the orchestrator on heartbeat timeout."
+            },
+            "running_task_ids": {
+              "type": "array",
+              "items": { "type": "string", "format": "uuid" },
+              "description": "UUIDs of tasks currently executing. Empty when idle.",
+              "default": []
+            },
+            "circuit_breaker_open": {
+              "type": "boolean",
+              "description": "True if Ollama circuit-breaker is tripped (≥3 consecutive failures). Corresponds to 'degraded' status.",
+              "default": false
+            },
+            "ollama_models_available": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Snapshot of currently available Ollama model tags. Used to detect model pulls/removals between heartbeats.",
+              "default": []
+            }
+          }
+        }
+      }
+    },
+
+    "AgentTaskAckMessage": {
+      "description": "Sent by the agent after receiving and accepting a 'task_push'. Transitions the task from 'dispatched' to 'running'. The orchestrator starts the wall-clock timeout timer on receipt of this message.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "task_ack" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "agent_id"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Task.id from the task_push message being acknowledged."
+            },
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "model_selected": {
+              "type": ["string", "null"],
+              "description": "Ollama model tag the agent has selected for this task. May differ from model_preferences.name if fallback occurred.",
+              "default": null
+            }
+          }
+        }
+      }
+    },
+
+    "AgentProgressMessage": {
+      "description": "Emitted by the agent at regular intervals during execution (streaming progress). Forwarded to the Manager Console as 'task_progress'. Rate: at most once per second per task. Agents in a ReAct loop emit progress at each reasoning step.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "progress" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "agent_id", "elapsed_ms"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "elapsed_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Milliseconds since task_ack."
+            },
+            "step": {
+              "type": ["string", "null"],
+              "description": "Human-readable description of the current ReAct step (e.g. 'Calling web_search', 'Generating response'). Null if not in a ReAct loop.",
+              "default": null
+            },
+            "tokens_so_far": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "Tokens consumed so far (prompt + completion). Null if not available.",
+              "default": null
+            },
+            "partial_output": {
+              "type": ["string", "null"],
+              "description": "Partial text output if streaming (optional, may be empty string). Not stored — for live console display only.",
+              "default": null
+            }
+          }
+        }
+      }
+    },
+
+    "AgentResultMessage": {
+      "description": "Sent by the agent when execution completes successfully. The orchestrator transitions the task to 'complete', stores the result, and emits a 'task_complete' audit event.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "result" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "agent_id", "output", "model_used", "duration_ms"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "output": {
+              "type": "string",
+              "description": "Agent's final response text. In a ReAct loop, this is the final answer after all tool calls are complete."
+            },
+            "model_used": {
+              "type": "string",
+              "description": "Actual Ollama model tag used. May differ from model_preferences.name if fallback occurred."
+            },
+            "tokens_used": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "Total tokens consumed (prompt + completion). Null if not reported by the model.",
+              "default": null
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Wall-clock execution time in milliseconds from task_ack to this message."
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "content_type"],
+                "properties": {
+                  "name":         { "type": "string" },
+                  "content_type": { "type": "string" },
+                  "data":         { "type": "string", "description": "Base64-encoded content (< 1 MB only). Use url for larger artifacts." },
+                  "url":          { "type": "string", "format": "uri", "description": "Presigned URL for larger artifacts (> 1 MB)." },
+                  "size_bytes":   { "type": "integer" }
+                }
+              },
+              "default": [],
+              "description": "Files and structured data produced by the task."
+            }
+          }
+        }
+      }
+    },
+
+    "AgentErrorMessage": {
+      "description": "Sent by the agent when execution fails. The orchestrator transitions the task to 'failed' (or re-dispatches if retry_eligible=true and retry_count < max_retries). Emits 'task_failed' audit event.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "error" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "agent_id", "code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "code": {
+              "type": "string",
+              "enum": ["ollama_error", "tool_error", "sandbox_escape", "timeout", "auth_error", "circuit_breaker", "unknown"],
+              "description": "Machine-readable error classification matching TaskError.code in task.schema.json."
+            },
+            "message": {
+              "type": "string",
+              "description": "Human-readable error description for the operator."
+            },
+            "retry_eligible": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether the orchestrator should attempt to re-dispatch. Mirrored to TaskError.retry_eligible."
+            },
+            "circuit_breaker_tripped": {
+              "type": "boolean",
+              "default": false,
+              "description": "True if this error caused the Ollama circuit-breaker to trip (3rd consecutive failure). The orchestrator transitions the agent to 'degraded' status."
+            }
+          }
+        }
+      }
+    },
+
+    "OrchestratorRegisteredMessage": {
+      "description": "Sent by the orchestrator in response to a 'register' message. Confirms the connection and provides the agent with any pending tasks or share_policy updates.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "registered" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["agent_id", "ref_message_id"],
+          "additionalProperties": false,
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "ref_message_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The 'id' field from the 'register' message this is acknowledging."
+            },
+            "heartbeat_interval_s": {
+              "type": "integer",
+              "default": 30,
+              "description": "Requested heartbeat interval. The orchestrator declares an agent offline after 3× this interval."
+            },
+            "share_policies": {
+              "type": "array",
+              "description": "Current share policies for this agent. Agent caches these for local dispatch validation.",
+              "items": {
+                "type": "object",
+                "required": ["token_id", "grantee_user_id", "scopes"],
+                "properties": {
+                  "token_id":         { "type": "string", "format": "uuid" },
+                  "grantee_user_id":  { "type": "string", "format": "uuid" },
+                  "scopes":           { "type": "array", "items": { "type": "string" } },
+                  "expires_at":       { "type": "string", "format": "date-time" }
+                }
+              },
+              "default": []
+            }
+          }
+        }
+      }
+    },
+
+    "OrchestratorHeartbeatAckMessage": {
+      "description": "Sent by the orchestrator in response to each 'heartbeat' message. Agents may use this to detect clock drift.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "heartbeat_ack" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["ref_message_id", "server_ts"],
+          "additionalProperties": false,
+          "properties": {
+            "ref_message_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The 'id' field from the 'heartbeat' message being acknowledged."
+            },
+            "server_ts": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Orchestrator server time at acknowledgement. Used by agent to detect excessive clock drift (>30s triggers a warning log)."
+            },
+            "share_policies_updated": {
+              "type": "boolean",
+              "default": false,
+              "description": "If true, the agent should re-fetch its share_policies. A full 'registered' message with updated policies follows immediately."
+            }
+          }
+        }
+      }
+    },
+
+    "OrchestratorTaskPushMessage": {
+      "description": "Sent by the orchestrator to dispatch a task to the agent. The agent must reply with 'task_ack' within 10 seconds or the orchestrator re-queues and re-dispatches. The full Task record is included so the agent does not need a REST call.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "task_push" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task"],
+          "additionalProperties": false,
+          "properties": {
+            "task": {
+              "type": "object",
+              "description": "Full Task record (as per task.schema.json). The agent validates token, data_class, and allowed_tools before acknowledging.",
+              "required": ["id", "submitter_id", "assigned_agent_id", "data_class", "input", "status", "priority", "created_at"],
+              "properties": {
+                "id":                { "type": "string", "format": "uuid" },
+                "submitter_id":      { "type": "string", "format": "uuid" },
+                "assigned_agent_id": { "type": "string", "format": "uuid" },
+                "share_token_id":    { "type": ["string", "null"], "format": "uuid" },
+                "parent_task_id":    { "type": ["string", "null"], "format": "uuid" },
+                "data_class":        { "type": "string", "enum": ["public", "internal", "confidential"] },
+                "input":             { "type": "object", "description": "TaskInputPlaintext or TaskInputEncrypted (see task.schema.json)" },
+                "allowed_tools":     { "type": "array", "items": { "type": "string" } },
+                "status":            { "type": "string", "const": "dispatched" },
+                "priority":          { "type": "integer" },
+                "deadline":          { "type": ["string", "null"], "format": "date-time" },
+                "timeout_s":         { "type": "integer" },
+                "retry_count":       { "type": "integer" },
+                "created_at":        { "type": "string", "format": "date-time" },
+                "dispatched_at":     { "type": "string", "format": "date-time" }
+              }
+            },
+            "ack_deadline_s": {
+              "type": "integer",
+              "default": 10,
+              "description": "Seconds within which the agent must send task_ack. If not received, orchestrator re-queues the task."
+            }
+          }
+        }
+      }
+    },
+
+    "OrchestratorRevokeMessage": {
+      "description": "Sent by the orchestrator to abort a running task. The agent must stop execution as quickly as possible, clean up, and NOT send a 'result' message for this task. May be sent while the task is running or dispatched.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "revoke" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Task.id to abort."
+            },
+            "reason": {
+              "type": ["string", "null"],
+              "enum": ["token_revoked", "submitter_request", "timeout", "quota_exceeded", "policy_violation", null],
+              "description": "Machine-readable reason code for the revocation.",
+              "default": null
+            }
+          }
+        }
+      }
+    },
+
+    "OrchestratorDrainMessage": {
+      "description": "Sent by the orchestrator when the agent pool is being drained (e.g. spot instance termination, graceful shutdown). The agent should complete its current task (if any), then disconnect cleanly. No new task_push messages will follow.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "drain" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["grace_period_s"],
+          "additionalProperties": false,
+          "properties": {
+            "grace_period_s": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Seconds before the orchestrator forcibly closes the connection. 0 = immediate. The agent transitions to 'draining' status and finishes its current task within this window."
+            },
+            "reason": {
+              "type": ["string", "null"],
+              "enum": ["pool_drain", "spot_termination", "operator_request", "runtime_upgrade", null],
+              "description": "Machine-readable reason code for the drain.",
+              "default": null
+            }
+          }
+        }
+      }
+    },
+
+    "ConsoleFleetEventMessage": {
+      "description": "Sent by the orchestrator to the Manager Console whenever agent status changes. Keeps the fleet view in sync without polling.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "fleet_event" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["agent_id", "event", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "event": {
+              "type": "string",
+              "enum": ["agent_registered", "agent_heartbeat", "agent_offline", "agent_degraded", "agent_recovered", "agent_draining", "agent_terminated"],
+              "description": "Audit event action that triggered this console push."
+            },
+            "status": {
+              "type": "string",
+              "enum": ["idle", "busy", "offline", "degraded", "draining"],
+              "description": "New agent status after this event."
+            },
+            "name": {
+              "type": ["string", "null"],
+              "description": "Agent display name (for console rendering without a separate fetch).",
+              "default": null
+            },
+            "location_tag": {
+              "type": ["string", "null"],
+              "default": null
+            },
+            "running_task_count": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "last_seen": {
+              "type": ["string", "null"],
+              "format": "date-time",
+              "default": null
+            }
+          }
+        }
+      }
+    },
+
+    "ConsoleTaskProgressMessage": {
+      "description": "Forwarded from the agent's 'progress' message to all Console connections subscribed to the task's owner. Rate-limited to once per second per task.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "task_progress" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "agent_id", "elapsed_ms"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id":       { "type": "string", "format": "uuid" },
+            "agent_id":      { "type": "string", "format": "uuid" },
+            "elapsed_ms":    { "type": "integer", "minimum": 0 },
+            "step":          { "type": ["string", "null"], "default": null },
+            "tokens_so_far": { "type": ["integer", "null"], "minimum": 0, "default": null },
+            "partial_output":{ "type": ["string", "null"], "default": null }
+          }
+        }
+      }
+    },
+
+    "ConsoleTaskCompleteMessage": {
+      "description": "Sent to all Console connections when a task transitions to a terminal state (complete, failed, timed_out, dead_letter). Includes a summary for the console task list — full result requires GET /tasks/{task_id}.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "task_complete" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["task_id", "agent_id", "final_status"],
+          "additionalProperties": false,
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "agent_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "final_status": {
+              "type": "string",
+              "enum": ["complete", "failed", "timed_out", "dead_letter"],
+              "description": "Terminal state the task transitioned to."
+            },
+            "duration_ms": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "Wall-clock execution time for complete tasks. Null for failed/timed_out.",
+              "default": null
+            },
+            "model_used": {
+              "type": ["string", "null"],
+              "description": "Ollama model tag used. Null for non-complete terminal states.",
+              "default": null
+            },
+            "error_code": {
+              "type": ["string", "null"],
+              "description": "Error code for failed tasks. Null for complete tasks.",
+              "default": null
+            },
+            "output_preview": {
+              "type": ["string", "null"],
+              "description": "First 256 characters of the task output. Null if result_visibility='none' for the console user or task failed.",
+              "maxLength": 256,
+              "default": null
+            }
+          }
+        }
+      }
+    },
+
+    "ConsoleTokenEventMessage": {
+      "description": "Sent to the owner's Console connections when a share token event occurs (minted, imported by grantee, used, revoked, expired).",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "token_event" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["token_id", "event"],
+          "additionalProperties": false,
+          "properties": {
+            "token_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "event": {
+              "type": "string",
+              "enum": ["token_minted", "token_imported", "token_used", "token_revoked", "token_expired"],
+              "description": "Audit event action that triggered this console push."
+            },
+            "grantee_user_id": {
+              "type": ["string", "null"],
+              "format": "uuid",
+              "default": null
+            },
+            "task_id": {
+              "type": ["string", "null"],
+              "format": "uuid",
+              "description": "For 'token_used' events: the Task.id dispatched under this token.",
+              "default": null
+            },
+            "is_active": {
+              "type": "boolean",
+              "description": "Updated is_active state for the token after this event."
+            }
+          }
+        }
+      }
+    },
+
+    "ConsoleQueueDepthMessage": {
+      "description": "Periodic push (every 5 seconds) from the orchestrator to Console connections with current queue depth. Allows the console to show queue depth without polling GET /metrics/queue-depth.",
+      "type": "object",
+      "required": ["type", "id", "ts", "payload"],
+      "properties": {
+        "type": { "type": "string", "const": "queue_depth" },
+        "id":   { "type": "string", "format": "uuid" },
+        "ts":   { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "required": ["total_pending", "total_running"],
+          "additionalProperties": false,
+          "properties": {
+            "total_pending": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total tasks in pending state across all visible agents."
+            },
+            "total_running": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total tasks in dispatched or running state."
+            },
+            "agents": {
+              "type": "array",
+              "description": "Per-agent breakdown. Only agents visible to the console user are included.",
+              "items": {
+                "type": "object",
+                "required": ["agent_id", "pending", "running"],
+                "properties": {
+                  "agent_id": { "type": "string", "format": "uuid" },
+                  "pending":  { "type": "integer", "minimum": 0 },
+                  "running":  { "type": "integer", "minimum": 0 }
+                }
+              },
+              "default": []
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "comment": "Agent registers after WebSocket upgrade",
+      "type": "register",
+      "id": "e1f2a3b4-c5d6-7e8f-9012-3a4b5c6d7e8f",
+      "ts": "2026-06-27T12:00:00.000000Z",
+      "payload": {
+        "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "runtime_version": "gd-0.1.0",
+        "capabilities": {
+          "models": ["llama3.1:70b", "qwen2.5-coder:32b"],
+          "tools": ["web_search", "file_read"],
+          "roles": ["analyst", "engineer"],
+          "hardware": { "cpu_cores": 16, "ram_gb": 64, "gpu": "RTX 4090 24GB", "disk_gb": 2000 }
+        }
+      }
+    },
+    {
+      "comment": "Agent reports heartbeat every 30s",
+      "type": "heartbeat",
+      "id": "f2a3b4c5-d6e7-8f90-1234-5a6b7c8d9e0f",
+      "ts": "2026-06-27T12:00:30.000000Z",
+      "payload": {
+        "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "status": "idle",
+        "running_task_ids": [],
+        "circuit_breaker_open": false,
+        "ollama_models_available": ["llama3.1:70b", "qwen2.5-coder:32b"]
+      }
+    },
+    {
+      "comment": "Orchestrator pushes a task to the agent",
+      "type": "task_push",
+      "id": "a3b4c5d6-e7f8-9012-3456-7a8b9c0d1e2f",
+      "ts": "2026-06-27T12:01:00.000000Z",
+      "payload": {
+        "task": {
+          "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "submitter_id": "550e8400-e29b-41d4-a716-446655440000",
+          "assigned_agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "share_token_id": null,
+          "parent_task_id": null,
+          "data_class": "internal",
+          "input": {
+            "_type": "plaintext",
+            "prompt": "Summarize the attached research paper.",
+            "role_template": "analyst",
+            "model_preferences": { "name": "llama3.1:70b", "temperature": 0.3 },
+            "input_files": [],
+            "context": null
+          },
+          "allowed_tools": ["web_search"],
+          "status": "dispatched",
+          "priority": 50,
+          "deadline": null,
+          "timeout_s": 300,
+          "retry_count": 0,
+          "created_at": "2026-06-27T12:00:55Z",
+          "dispatched_at": "2026-06-27T12:01:00Z"
+        },
+        "ack_deadline_s": 10
+      }
+    },
+    {
+      "comment": "Agent acknowledges the task, begins execution",
+      "type": "task_ack",
+      "id": "b4c5d6e7-f8a9-0123-4567-8b9c0d1e2f3a",
+      "ts": "2026-06-27T12:01:02.000000Z",
+      "payload": {
+        "task_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "model_selected": "llama3.1:70b"
+      }
+    },
+    {
+      "comment": "Agent sends progress during a ReAct step",
+      "type": "progress",
+      "id": "c5d6e7f8-a9b0-1234-5678-9c0d1e2f3a4b",
+      "ts": "2026-06-27T12:01:15.000000Z",
+      "payload": {
+        "task_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "elapsed_ms": 13000,
+        "step": "Calling web_search",
+        "tokens_so_far": 312,
+        "partial_output": null
+      }
+    },
+    {
+      "comment": "Agent sends final result",
+      "type": "result",
+      "id": "d6e7f8a9-b0c1-2345-6789-0d1e2f3a4b5c",
+      "ts": "2026-06-27T12:01:55.000000Z",
+      "payload": {
+        "task_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        "agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "output": "The paper presents three key findings...",
+        "model_used": "llama3.1:70b",
+        "tokens_used": 4821,
+        "duration_ms": 53000,
+        "artifacts": []
+      }
+    }
+  ]
+}

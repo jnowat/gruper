@@ -1,0 +1,381 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gruper.dev/schemas/gd-0.1/task.json",
+  "title": "Task",
+  "description": "Gruper Distributed task record. Represents a unit of work submitted by a user or manager agent for execution on a specific agent node. See core-mapping.md for how Gruper core's per-agent config maps to the input schema.",
+  "version": "gd-0.1",
+  "type": "object",
+  "required": ["id", "submitter_id", "assigned_agent_id", "data_class", "input", "status", "priority", "created_at"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Primary key. UUID v4."
+    },
+    "correlation_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Caller-assigned idempotency / deduplication key. If a task with this correlation_id already exists for this submitter, the existing task is returned instead of creating a new one.",
+      "default": null
+    },
+    "submitter_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "User.id or Agent.id (for manager agent sub-tasks) of the entity that submitted this task."
+    },
+    "assigned_agent_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Agent.id of the target executor. Explicit assignment only in gd-0.1 through gd-0.5. Capability-based auto-dispatch added at gd-0.6 (WP-19)."
+    },
+    "parent_task_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "Task.id of the parent task when this is a manager-agent sub-task (WP-11). Null for top-level tasks.",
+      "default": null
+    },
+    "share_token_id": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "ShareToken.id used to authorize this dispatch (cross-owner tasks only). Null for tasks to owned agents.",
+      "default": null
+    },
+    "data_class": {
+      "type": "string",
+      "enum": ["public", "internal", "confidential"],
+      "description": "Data classification controlling which agents may receive this task. Enforced by the orchestrator at dispatch time — not advisory. public=any in-scope agent; internal=owner + granted agents; confidential=agents satisfying jurisdiction and compliance posture policy."
+    },
+    "input": {
+      "oneOf": [
+        { "$ref": "#/$defs/TaskInputPlaintext" },
+        { "$ref": "#/$defs/TaskInputEncrypted" }
+      ],
+      "description": "Task payload. Plaintext JSON for gd-0.1 through gd-0.4 and for owned-agent tasks. Encrypted blob (TaskInputEncrypted) for cross-owner tasks after gd-0.5 (WP-16)."
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["code_interpreter", "web_search", "file_read", "file_write", "n8n_webhook", "http_request", "email_send", "slack_post", "vector_store"]
+      },
+      "description": "Tool allow-list for this specific task. Must be a subset of both the agent's registered tools and the share token's granted scopes. Omit to use the grant's full tool scope.",
+      "default": []
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "dispatched", "running", "complete", "failed", "timed_out", "dead_letter"],
+      "description": "Task lifecycle state. pending=queued; dispatched=pushed to agent; running=agent acknowledged; complete=result received; failed=agent reported error; timed_out=deadline or timeout_s exceeded; dead_letter=max retries exhausted."
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 50,
+      "description": "Dispatch priority. Higher value = dispatched sooner. Tasks with equal priority are FIFO."
+    },
+    "deadline": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "ISO 8601 UTC deadline. Task is moved to dead_letter status if not dispatched by this time. Null = no deadline.",
+      "default": null
+    },
+    "timeout_s": {
+      "type": "integer",
+      "minimum": 60,
+      "maximum": 86400,
+      "default": 300,
+      "description": "Maximum wall-clock execution time in seconds from dispatch. Mirrors Gruper core's configurable timeout presets (180s Fast, 300s Balanced, 600s Patient, 900s Very Patient, custom 60–3600s). Range extended to 86400s for overnight batch tasks."
+    },
+    "retry_count": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "Number of dispatch attempts. Incremented on agent disconnect during execution; dead-lettered after max_retries (default 3)."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "dispatched_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "default": null
+    },
+    "completed_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "default": null
+    },
+    "result": {
+      "oneOf": [
+        { "$ref": "#/$defs/TaskResult" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Populated when status=complete."
+    },
+    "error": {
+      "oneOf": [
+        { "$ref": "#/$defs/TaskError" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "Populated when status=failed or timed_out."
+    },
+    "logs_ref": {
+      "type": ["string", "null"],
+      "format": "uri",
+      "description": "URL to full execution log (presigned S3 URL or local HTTP). Null if result_visibility='output_only' or 'none' for the caller.",
+      "default": null
+    },
+    "cost_cents": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Estimated compute cost in USD cents. Null for desktop agents; populated for cloud agent pools (WP-13).",
+      "default": null
+    },
+    "audit_hash": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 hex hash of the task result, stored in the audit Event record. Null until task is complete.",
+      "default": null
+    }
+  },
+  "$defs": {
+    "ModelPreferences": {
+      "type": "object",
+      "description": "Inference parameters mapping directly to Gruper core v0.4.5 per-agent config. See core-mapping.md for the complete field-by-field mapping to Ollama API options.",
+      "properties": {
+        "name": {
+          "type": ["string", "null"],
+          "description": "Preferred Ollama model tag. Agent uses closest available if exact tag not present.",
+          "examples": ["llama3.1:70b", "qwen2.5-coder:32b", "mistral:7b"]
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0, "maximum": 1,
+          "description": "Controls randomness. Maps to Ollama 'temperature'. Gruper core range and UI: 0–1."
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0, "maximum": 1,
+          "description": "Nucleus sampling threshold. Maps to Ollama 'top_p'. Gruper core JS field: 'topP'."
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 1, "maximum": 100,
+          "description": "Vocabulary selection limit. Maps to Ollama 'top_k'. Gruper core JS field: 'topK'."
+        },
+        "repeat_penalty": {
+          "type": "number",
+          "minimum": 0.5, "maximum": 2.0,
+          "description": "Repetition penalty. Maps to Ollama 'repeat_penalty'. Gruper core JS field: 'repeatPenalty'."
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 128, "maximum": 8192,
+          "description": "Maximum response length. Maps to Ollama 'num_predict'. Gruper core JS field: 'maxTokens'."
+        },
+        "context_length": {
+          "type": "integer",
+          "minimum": 512, "maximum": 131072,
+          "description": "Context window size. Maps to Ollama 'num_ctx'. Gruper core stores this as 'contextLength' (UI range 512–16384); distributed extends max for capable models."
+        },
+        "seed": {
+          "type": ["integer", "null"],
+          "description": "Seed for reproducible outputs. Maps to Ollama 'seed'. Null = random.",
+          "default": null
+        },
+        "stop_sequences": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Custom stop sequences appended to template defaults. Maps to Ollama 'stop'. Gruper core JS field: 'stopSequences'.",
+          "default": []
+        }
+      }
+    },
+    "TaskInputPlaintext": {
+      "type": "object",
+      "required": ["prompt"],
+      "description": "Unencrypted task input. Used for gd-0.1 through gd-0.4 and for all owned-agent tasks. Cross-owner tasks migrate to TaskInputEncrypted at gd-0.5.",
+      "properties": {
+        "_type": {
+          "type": "string",
+          "const": "plaintext",
+          "description": "Discriminator field. Must be 'plaintext' for this variant."
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The task goal / prompt. Placed as the final user message in the Ollama messages array."
+        },
+        "system_prompt": {
+          "type": ["string", "null"],
+          "description": "System prompt override. Replaces the role template's default system prompt if provided.",
+          "default": null
+        },
+        "role_template": {
+          "type": "string",
+          "enum": ["analyst", "creative", "critic", "synthesizer", "expert", "devil_advocate", "philosopher", "economist", "ethicist", "scientist", "psychologist", "engineer", "custom"],
+          "default": "analyst",
+          "description": "Gruper core role template. Sets the system prompt and parameter defaults. Overridden field-by-field by model_preferences."
+        },
+        "model_preferences": {
+          "oneOf": [
+            { "$ref": "#/$defs/ModelPreferences" },
+            { "type": "null" }
+          ],
+          "default": null,
+          "description": "Inference parameter overrides. Fields present here override role_template defaults. Absent fields use template defaults."
+        },
+        "input_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "content_type"],
+            "properties": {
+              "name":         { "type": "string" },
+              "content_type": { "type": "string", "examples": ["text/plain", "application/pdf", "image/png"] },
+              "data":         { "type": "string", "description": "Base64-encoded file content. Use for files < 1 MB." },
+              "url":          { "type": "string", "format": "uri", "description": "Presigned URL for files > 1 MB. See OQ-4." }
+            }
+          },
+          "default": [],
+          "description": "Files attached to this task. Available to the agent as tool results in the reasoning context."
+        },
+        "context": {
+          "type": ["object", "null"],
+          "additionalProperties": true,
+          "description": "Structured context passed to the agent (prior results, research inputs, state). Intentionally loose to accommodate ReAct loop state and future graph-engine state (OQ-1).",
+          "default": null
+        }
+      }
+    },
+    "TaskInputEncrypted": {
+      "type": "object",
+      "required": ["_type", "encrypted", "ephemeral_pubkey", "nonce"],
+      "description": "E2E-encrypted task input for cross-owner tasks (gd-0.5+ / WP-16). Plaintext is TaskInputPlaintext JSON encrypted with X25519 ECDH + ChaCha20-Poly1305 to the target agent's x25519_pubkey. The orchestrator stores and relays the ciphertext without decrypting it.",
+      "properties": {
+        "_type": {
+          "type": "string",
+          "const": "encrypted",
+          "description": "Discriminator field. Must be 'encrypted' for this variant."
+        },
+        "encrypted": {
+          "type": "string",
+          "description": "Base64url-encoded ChaCha20-Poly1305 AEAD ciphertext of the TaskInputPlaintext JSON.",
+          "pattern": "^[A-Za-z0-9_-]+=*$"
+        },
+        "ephemeral_pubkey": {
+          "type": "string",
+          "description": "Base64url-encoded X25519 ephemeral public key used for ECDH key agreement.",
+          "pattern": "^[A-Za-z0-9_-]+=*$"
+        },
+        "nonce": {
+          "type": "string",
+          "description": "Base64url-encoded 12-byte ChaCha20-Poly1305 nonce. Must be unique per encryption.",
+          "pattern": "^[A-Za-z0-9_-]{16}$"
+        }
+      }
+    },
+    "TaskResult": {
+      "type": "object",
+      "required": ["output", "model_used", "duration_ms"],
+      "description": "Task execution result. Populated when task.status='complete'.",
+      "properties": {
+        "output": {
+          "type": "string",
+          "description": "Agent's final response text. In a ReAct loop, this is the final answer. Rendered in the Manager Console via Gruper core's conversation message rendering."
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "content_type"],
+            "properties": {
+              "name":         { "type": "string" },
+              "content_type": { "type": "string" },
+              "data":         { "type": "string", "description": "Base64-encoded content (< 1 MB only)" },
+              "url":          { "type": "string", "format": "uri", "description": "Presigned URL for larger artifacts" },
+              "size_bytes":   { "type": "integer" }
+            }
+          },
+          "default": [],
+          "description": "Files and structured data produced by the task."
+        },
+        "model_used": {
+          "type": "string",
+          "description": "Actual Ollama model tag used. May differ from model_preferences.name if fallback occurred."
+        },
+        "tokens_used": {
+          "type": ["integer", "null"],
+          "description": "Total tokens consumed (prompt + completion). Null if not reported by the model.",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock execution time in milliseconds from task_ack to result message."
+        }
+      }
+    },
+    "TaskError": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": ["ollama_error", "tool_error", "sandbox_escape", "timeout", "auth_error", "circuit_breaker", "unknown"],
+          "description": "Machine-readable error classification."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error description for the operator."
+        },
+        "retry_eligible": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the orchestrator should attempt to re-dispatch this task."
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "correlation_id": null,
+      "submitter_id": "550e8400-e29b-41d4-a716-446655440000",
+      "assigned_agent_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "parent_task_id": null,
+      "share_token_id": null,
+      "data_class": "internal",
+      "input": {
+        "_type": "plaintext",
+        "prompt": "Summarize the attached research paper and identify the top three actionable findings.",
+        "role_template": "analyst",
+        "model_preferences": {
+          "name": "llama3.1:70b",
+          "temperature": 0.3,
+          "max_tokens": 4096
+        },
+        "input_files": [],
+        "context": null
+      },
+      "allowed_tools": ["web_search", "file_read"],
+      "status": "pending",
+      "priority": 50,
+      "deadline": null,
+      "timeout_s": 300,
+      "retry_count": 0,
+      "created_at": "2026-06-27T12:00:00Z",
+      "dispatched_at": null,
+      "completed_at": null,
+      "result": null,
+      "error": null,
+      "logs_ref": null,
+      "cost_cents": null,
+      "audit_hash": null
+    }
+  ]
+}
