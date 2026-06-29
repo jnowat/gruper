@@ -93,7 +93,7 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
                 if agent_id is None:
                     await websocket.send_json({"type": "error", "detail": "send register before progress"})
                 else:
-                    await _handle_progress(agent_id, msg)
+                    await _handle_progress(pool, agent_id, msg)
 
             elif msg_type == _MSG_RESULT:
                 if agent_id is None:
@@ -227,11 +227,31 @@ async def _handle_task_ack(
         logger.warning("task_ack ignored for task %s (not dispatched to agent %s)", task_id, agent_id)
 
 
-async def _handle_progress(agent_id: str, msg: dict) -> None:
-    """Log a progress frame from the agent (WP-05 will relay to submitter)."""
+async def _handle_progress(pool: asyncpg.Pool, agent_id: str, msg: dict) -> None:
+    """Forward a progress frame from the agent to the task submitter's console."""
     task_id = msg.get("task_id", "?")
-    text = msg.get("text", "")
-    logger.info("Progress task=%s agent=%s: %s", task_id, agent_id, text[:200])
+    partial = msg.get("partial_output") or msg.get("text") or None
+    elapsed = msg.get("elapsed_ms", 0)
+    step = msg.get("step")
+    tokens = msg.get("tokens_so_far")
+
+    logger.info("Progress task=%s agent=%s: %s", task_id, agent_id, (partial or step or "")[:200])
+
+    row = await pool.fetchrow(
+        "SELECT submitter_id::text FROM tasks WHERE id = $1::uuid", task_id
+    )
+    if row:
+        await manager.broadcast_to_user(row["submitter_id"], {
+            "type": "task_progress",
+            "payload": {
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "elapsed_ms": elapsed,
+                "step": step,
+                "tokens_so_far": tokens,
+                "partial_output": partial,
+            },
+        })
 
 
 async def _handle_result(
@@ -281,6 +301,33 @@ async def _handle_result(
             metadata={"agent_id": agent_id},
         )
         logger.info("Task %s %s (agent=%s)", task_id, terminal_status, agent_id)
+
+        # Relay terminal status to the submitter's open console connections.
+        output_preview: str | None = None
+        duration_ms: int | None = None
+        model_used: str | None = None
+        if isinstance(result_payload, dict):
+            raw_output = result_payload.get("output", "")
+            if raw_output:
+                output_preview = str(raw_output)[:256]
+            duration_ms = result_payload.get("duration_ms")
+            model_used = result_payload.get("model_used")
+        error_code: str | None = None
+        if isinstance(error_payload, dict):
+            error_code = error_payload.get("code")
+
+        await manager.broadcast_to_user(user_id, {
+            "type": "task_complete",
+            "payload": {
+                "task_id": task_id,
+                "agent_id": agent_id,
+                "final_status": terminal_status,
+                "duration_ms": duration_ms,
+                "model_used": model_used,
+                "error_code": error_code,
+                "output_preview": output_preview,
+            },
+        })
     else:
         logger.warning(
             "result ignored for task %s (not running on agent %s)", task_id, agent_id

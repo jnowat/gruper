@@ -56,6 +56,7 @@ All endpoints are under `/v1`. Full machine-readable spec: `spec/contracts/opena
 | `POST` | `/v1/agents` | Bearer JWT | Register an agent node |
 | `GET` | `/v1/agents` | Bearer JWT | List your agent nodes |
 | `WS` | `/v1/agents/ws?token=<jwt>` | JWT query param | Agent heartbeat + task dispatch channel |
+| `WS` | `/v1/console/ws?token=<jwt>` | JWT query param | Manager Console — real-time fleet events + task progress relay |
 | `POST` | `/v1/tasks` | Bearer JWT | Submit a task for dispatch to an agent |
 | `GET` | `/v1/tasks` | Bearer JWT | List tasks submitted by the caller |
 | `GET` | `/v1/tasks/{task_id}` | Bearer JWT | Get a specific task by ID |
@@ -270,8 +271,8 @@ orchestrator/
 | Feature | Stub notes | Work Packet |
 |---------|-----------|-------------|
 | ed25519 signature verification on `POST /v1/auth/token` | Any caller with a syntactically valid pubkey receives a token | WP-07 |
-| Result relay to console (`progress` / `result` frames → submitter WS) | Logged only; no console WS yet | WP-05 |
-| Console WebSocket (`GET /v1/console/ws`) | Defined in `openapi.yaml`; not implemented | WP-05 |
+| Result relay to console (`progress` / `result` frames → submitter WS) | ✅ Implemented in WP-05: `broadcast_to_user` in `connection_manager.py`; wired in `agent_ws.py` | — |
+| Console WebSocket (`GET /v1/console/ws`) | ✅ Implemented in WP-05: `orchestrator/ws/console_ws.py`; sends `fleet_snapshot` on connect | — |
 | Cross-owner share tokens | Schema designed in `models/share-token.schema.json` | WP-08 |
 | E2E payload encryption (X25519 + ChaCha20-Poly1305) | `x25519_pubkey` column exists in agents; null | WP-16 |
 | Audit log hash chain | `prev_hash` / `entry_hash` columns exist; all null | WP-17 |

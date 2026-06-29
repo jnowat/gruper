@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Gruper glassmorphism variables (mirrors Gruper core's CSS custom properties) ── */
+:root {
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-bg-hover: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: 12px;
+  --accent: #3b82f6;       /* blue-500 */
+  --accent-hover: #60a5fa; /* blue-400 */
+  --success: #22c55e;      /* green-500 */
+  --warning: #f59e0b;      /* amber-500 */
+  --error: #ef4444;        /* red-500 */
+  --muted: #64748b;        /* slate-500 */
+}
+
+/* Glassmorphism card — same feel as Gruper core's agent panels */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 0.75rem;
+}
+
+.glass-card:hover {
+  background: var(--glass-bg-hover);
+}
+
+/* Status badge colours matching Gruper core's agent-status indicator */
+.status-idle     { color: var(--success); }
+.status-busy     { color: var(--warning); }
+.status-offline  { color: var(--muted); }
+.status-degraded { color: var(--error); }
+.status-draining { color: var(--warning); opacity: 0.7; }
+
+/* Scrollbar — dark thin style matching core */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* Result view — conversation bubble, mirrors Gruper core's message rendering */
+.message-bubble {
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Progress bar animation for running tasks */
+@keyframes progress-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.progress-pulse { animation: progress-pulse 1.5s ease-in-out infinite; }

@@ -116,25 +116,31 @@ A companion system that extends Gruper Core across multiple machines and multipl
 
 ### Current status
 
-**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is underway — task dispatch is being wired up now.
+**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is underway — task dispatch shipped; Manager Console scaffold in progress.
 
 **What's shipped (`gd-0.1` / `gd-0.2` in progress):**
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
-| `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, agent WS heartbeat, task dispatch (WP-04) |
+| `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, task dispatch + relay, console WS (WP-04/05) |
 | `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker |
-| `console/` | 🔲 WP-05 | Tauri + Svelte scaffold — not started |
+| `console/` | 🔄 WP-05 | Tauri v2 + Svelte 5 scaffold complete; run `npm install` to activate CI build |
 
-**Task dispatch (`gd-0.2` / WP-04) — in progress:**
-- `POST /v1/tasks` — submit task with explicit agent assignment, priority, deadline, idempotency key
-- Dispatcher pushes immediately if agent is online; task stays `pending` for reconnect drain if offline
-- Task lifecycle: `pending → dispatched → running → complete | failed | timed_out | dead_letter`
-- Retry on disconnect (up to 3); dead-letter after max retries
-- Timeout watchdog background task
+**Manager Console (`gd-0.2` / WP-05) — scaffold shipped:**
 
-**Next:** console scaffold (WP-05), end-to-end relay validation (WP-06).
+```bash
+cd console
+npm install          # generates package-lock.json — commit this to activate CI build
+npm run dev          # starts Vite dev server on :5173
+cd src-tauri && cargo build   # verify Rust compiles
+# Then in a separate terminal:
+npx tauri dev        # launches the desktop app against the running dev server
+```
+
+To connect the console, start the orchestrator first (`docker compose up` in `orchestrator/`), then enter the orchestrator URL and your public key in the Connect dialog.
+
+**Next:** commit `package-lock.json` to activate CI build (WP-05 step 8), end-to-end relay validation (WP-06).
 
 ### Architecture
 

@@ -11,6 +11,7 @@ from .connection_manager import manager
 from .database import close_db, get_pool, init_db, run_migrations
 from .routers import agents, auth, health, tasks
 from .ws.agent_ws import handle_agent_ws
+from .ws.console_ws import handle_console_ws
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -109,5 +110,14 @@ async def agent_ws(
     websocket: WebSocket,
     token: str = Query(..., description="JWT issued by POST /v1/auth/token"),
 ) -> None:
-    """WebSocket endpoint for agent heartbeat and status reporting."""
+    """WebSocket endpoint for agent heartbeat and task dispatch."""
     await handle_agent_ws(websocket, token)
+
+
+@app.websocket("/v1/console/ws")
+async def console_ws(
+    websocket: WebSocket,
+    token: str = Query(..., description="JWT issued by POST /v1/auth/token"),
+) -> None:
+    """WebSocket endpoint for the Manager Console — real-time fleet and task events."""
+    await handle_console_ws(websocket, token)
