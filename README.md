@@ -2,6 +2,7 @@
 
 [![Core Version](https://img.shields.io/badge/core%20version-0.4.5-blue.svg)](Gruper.html)
 [![Distributed](https://img.shields.io/badge/distributed-gd--0.2%20%E2%80%94%20task%20dispatch-orange.svg)](orchestrator/)
+[![Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml/badge.svg)](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Docs:** [User Manual](UserManual.md) · [Distributed Spec](GruperDistributedSpec.md) · [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md)
@@ -195,6 +196,31 @@ Full detail in [ROADMAP.md](ROADMAP.md).
 - Transport: WSS over TLS
 - Encryption: X25519 ECDH + ChaCha20-Poly1305 (payload), ed25519 (identity)
 - Schemas: JSON Schema 2020-12, generates Pydantic (FastAPI) and TypeScript (console)
+
+---
+
+## Downloads
+
+**Gruper Core** is a single file — no installer needed:
+
+```bash
+# Latest release
+curl -LO https://github.com/jnowat/gruper/releases/latest/download/Gruper.html
+# or just clone the repo and open Gruper.html
+```
+
+**Gruper Console (Manager Console)** — Windows installer will be available here once
+WP-05 ships the first buildable scaffold. The CI workflow is already in place:
+
+| Platform | Installer | Status |
+|----------|-----------|--------|
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — [workflow](.github/workflows/build-windows.yml) ready |
+| macOS | `.dmg` | Planned — WP-05 |
+| Linux | `.AppImage` / `.deb` | Planned — WP-05 |
+
+Pre-release builds (unsigned) will be attached to [GitHub Releases](https://github.com/jnowat/gruper/releases)
+on every version tag. All pre-v1 builds carry a Windows SmartScreen warning — this is expected
+and will be resolved with a code-signing certificate before v1.0.
 
 ---
 

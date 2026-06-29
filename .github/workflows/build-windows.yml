@@ -1,0 +1,130 @@
+name: Build Windows Installer
+
+# Triggers:
+#   - Push to main: builds and uploads installers as workflow artifacts (CI smoke check).
+#   - Version tag (v*): builds, uploads artifacts, AND creates a draft GitHub Release
+#     with the .exe and .msi attached. Publish the draft manually after reviewing.
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+
+# One build per branch/tag at a time. A new push cancels an in-progress build
+# on the same ref, preventing artifact races on rapid commits to main.
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Windows x64 — NSIS (.exe) + WiX (.msi)
+    runs-on: windows-latest
+
+    # contents:write is required for tauri-action to create/update a GitHub Release.
+    # It is a no-op for branch-push builds.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Frontend toolchain ──────────────────────────────────────────────────
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # cache: requires console/package-lock.json — available once WP-05 scaffolds the console.
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+
+      # ── Rust toolchain ──────────────────────────────────────────────────────
+
+      - name: Set up Rust stable (x86_64-pc-windows-msvc)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Cache compiled Rust crates. The cache key includes the Cargo.lock hash so
+      # it invalidates on any dependency update. Cold builds take ~15–25 min;
+      # warm cache cuts that to under 3 min.
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: console/src-tauri -> target
+
+      # ── Build ───────────────────────────────────────────────────────────────
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: console
+
+      - name: Build Tauri app (Windows x64)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # ── Code signing (placeholder — unsigned for pre-v1 builds) ──────────
+          #
+          # Without a certificate, Windows Defender SmartScreen shows an
+          # "Unknown publisher" warning on first run. That is acceptable for
+          # pre-v1 internal testing. Enable signing before any public release.
+          #
+          # To add a self-signed certificate for development:
+          #   1. Generate a PFX:
+          #        openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+          #          -days 365 -nodes -subj "/CN=Gruper Dev"
+          #        openssl pkcs12 -export -out cert.pfx \
+          #          -inkey key.pem -in cert.pem -passout pass:changeme
+          #   2. Base64-encode it and store as a repository secret:
+          #        base64 -w 0 cert.pfx   → copy output → TAURI_SIGNING_PRIVATE_KEY
+          #   3. Store the export password as: TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          #
+          # For production (EV certificate from DigiCert / Sectigo / GlobalSign):
+          #   Follow the vendor's signing documentation, then set the same two secrets.
+          #
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+        with:
+          projectPath: console
+
+          # Build both installer types:
+          #   nsis → portable NSIS installer (.exe) — simpler install, no admin required
+          #   msi  → WiX-based MSI installer (.msi) — required by enterprise IT and
+          #          Group Policy software deployment
+          args: --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+          # Release settings — only takes effect when triggered by a version tag.
+          # For branch-push builds, tagName resolves to '' and no release is created.
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: Gruper Console ${{ github.ref_name }}
+          releaseBody: |
+            See [ROADMAP.md](https://github.com/jnowat/gruper/blob/main/ROADMAP.md) for what changed.
+
+            > **Pre-release:** Gruper Distributed is pre-v1. These builds are for
+            > testing only. Unsigned — Windows SmartScreen will warn on first run.
+          releaseDraft: true    # always draft; publish manually after reviewing
+          prerelease: true      # all gd-0.x builds are pre-releases
+
+      # ── Artifact upload ─────────────────────────────────────────────────────
+      # Artifacts are available on the Actions run summary for 30 days.
+      # On tag builds they are also attached to the GitHub Release draft above.
+
+      - name: Upload NSIS installer (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-console-${{ github.ref_name }}-windows-x64-setup.exe
+          path: console/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload MSI installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-console-${{ github.ref_name }}-windows-x64.msi
+          path: console/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          retention-days: 30
+          if-no-files-found: warn
