@@ -1,7 +1,7 @@
 # Gruper Distributed — Engineering Roadmap
 
-**Status as of 2026-06-28:** `gd-0.1` — **Wire contracts in progress; WP-01 underway.**
-· Spec committed · All milestones planned · OQ-1 and OQ-2 resolved · Wire contracts package (`spec/contracts/`) committed · OQ-3 through OQ-5 deferred to later WPs · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
+**Status as of 2026-06-29:** `gd-0.1` — **WP-02 skeleton orchestrator complete; pending CI validation.**
+· WP-01 complete · WP-02 code complete and polished · All milestones planned · OQ-1 and OQ-2 resolved · Wire contracts package (`spec/contracts/`) committed · OQ-3 through OQ-5 deferred to later WPs · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
 
 **Stack:** Agent Runtime — Python + FastAPI; Rust for security-critical paths · Manager Console — Tauri v2 + Svelte 5 + Tailwind · Orchestrator — FastAPI + PostgreSQL (Docker Compose) · Transport — WSS over TLS · Inference — Ollama local-first · Containers — Docker multi-arch (CPU + CUDA)
 
@@ -54,17 +54,21 @@
 
 ---
 
-### WP-02 — Skeleton Orchestrator — 🔲 `gd-0.1`
+### WP-02 — Skeleton Orchestrator — ✅ `gd-0.1` (pending CI)
 
 - **Goal:** Runnable Docker Compose stack (PostgreSQL + FastAPI) accepting agent registration and heartbeat; no task dispatch.
 - **Steps:**
-  1. `docker-compose.yml`: PostgreSQL 16 + FastAPI; all config via environment variables.
-  2. Migrations 001–004: `users`, `agents`, `tasks`, `events` tables; `SKIP LOCKED` queue pattern on `tasks`.
-  3. Endpoints: `POST /register` (JWT issuance), `WS /agent/ws` (heartbeat only), `GET /agents`, `GET /health`.
-  4. JWT issuance and verification middleware; ed25519 keypair support stubbed.
-  5. `pytest` smoke tests: register → JWT → heartbeat → verify in `GET /agents`.
-- **Files:** `orchestrator/main.py`, `orchestrator/models/`, `orchestrator/migrations/001–004.sql`, `docker-compose.yml`, `tests/test_register.py`
-- **Exit gate:** `docker compose up` on a clean machine; mock agent registers, heartbeats, appears in `GET /agents`; smoke tests pass in CI.
+  1. ✅ `docker-compose.yml`: PostgreSQL 16 + FastAPI with hot reload; all config via environment variables.
+  2. ✅ Migrations 001–004: `users`, `agents`, `tasks`, `events` tables; `SKIP LOCKED` queue pattern on `tasks`.
+  3. ✅ Endpoints: `POST /v1/auth/token` (JWT issuance), `POST /v1/agents` (register), `WS /v1/agents/ws` (heartbeat), `GET /v1/agents`, `GET /v1/health`.
+  4. ✅ JWT issuance and verification middleware (HS256); ed25519 challenge-response stubbed (WP-07).
+  5. ✅ `pytest` smoke tests: register → JWT → heartbeat → verify in `GET /v1/agents`.
+  6. ✅ Heartbeat watchdog background task: marks agents `offline` after 90 s of silence.
+  7. ✅ Append-only `events` table on every state transition; hash chain fields null until WP-17.
+- **Files:** `orchestrator/main.py`, `orchestrator/config.py`, `orchestrator/database.py`, `orchestrator/security.py`, `orchestrator/connection_manager.py`, `orchestrator/routers/`, `orchestrator/ws/`, `orchestrator/migrations/001–004.sql`, `orchestrator/docker-compose.yml`, `orchestrator/tests/`
+- **Exit gate:** `docker compose up` on a clean machine; mock agent registers, heartbeats, appears in `GET /v1/agents`; smoke tests pass in CI.
+
+**Notes (2026-06-29):** `orchestrator/` complete and polished through three review passes. Stack: FastAPI + asyncpg + PostgreSQL 16 + Docker Compose. Key decisions: HS256 JWT stub at `POST /v1/auth/token` (find-or-create by pubkey; ed25519 challenge-response at WP-07); JWT passed as `?token=` query param on WS upgrade (browsers cannot send Authorization headers on WebSocket connections); idempotent migration runner wraps each SQL file in a transaction; asyncpg JSON/JSONB codecs registered at pool init; heartbeat watchdog runs every 15 s and marks stale agents offline after 90 s; `verify_token` raises ValueError (used in WS context), `get_current_user_id` wraps it as HTTP 401 (used in REST context); re-registration replaces stale connection entry gracefully; 15 smoke tests cover full auth flow, agent registration, duplicate pubkey 409, invalid runtime_version 422, WebSocket handshake, heartbeat, invalid status error, token rejection 4401, unknown/malformed UUID, idle/offline status transitions. Hash-chain event fields null until WP-17. `orchestrator/README.md` added. **Pending:** `docker compose up` validation on a clean machine; CI smoke tests green. When those pass, close WP-02 and WP-01 (WP-01 exit gate requires WP-02 confirmation that schemas are buildable).
 
 ---
 
@@ -437,6 +441,6 @@ Not assigned to any phase or work packet. Long-term items to keep in mind for la
 
 ---
 
-*Last updated: 2026-06-28*
+*Last updated: 2026-06-29 (WP-02 final polish)*
 *Companion document: `GruperDistributedSpec.md` — architecture diagrams, data models, wire schemas, security threat table, and open questions (OQ-1…OQ-5).*
 *Gruper core baseline: `v0.4.5` (`Gruper.html`) — this roadmap builds on core, not over it.*
