@@ -1,7 +1,7 @@
 # Gruper Distributed — Engineering Roadmap
 
-**Status as of 2026-06-29:** `gd-0.1` / `gd-0.2` — **Phase 0 complete; WP-04 complete; WP-05 console scaffold in progress.**
-· WP-01 ✅ · WP-02 ✅ · WP-03 ✅ (exit gate pending real relay validation) · WP-04 ✅ (dispatcher + tasks router + timeout watchdog + smoke tests; result relay wired in WP-05) · WP-05 🔄 (console scaffold + console WS relay complete; `npm install` + lock-file commit needed to activate CI build) · All milestones planned · OQ-1 and OQ-2 resolved · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
+**Status as of 2026-06-29:** `gd-0.1` / `gd-0.2` — **Phase 0 complete; WP-03/04/05 code complete; WP-06 live relay validation is the remaining `gd-0.2` gate.**
+· WP-01 ✅ · WP-02 ✅ · WP-03 ✅ code complete (live relay leg in WP-06) · WP-04 ✅ code complete (dispatcher + tasks router + timeout watchdog + smoke tests + result relay) · WP-05 ✅ scaffold complete (console + console WS relay; frontend build verified; CI installer build armed) · WP-06 🔄 next · OQ-1 and OQ-2 resolved · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
 
 **Stack:** Agent Runtime — Python + FastAPI; Rust for security-critical paths · Manager Console — Tauri v2 + Svelte 5 + Tailwind · Orchestrator — FastAPI + PostgreSQL (Docker Compose) · Transport — WSS over TLS · Inference — Ollama local-first · Containers — Docker multi-arch (CPU + CUDA)
 
@@ -74,7 +74,7 @@
 
 ## Phase 1 — Walking Skeleton — 🔄 `gd-0.2`
 
-### WP-03 — Agent Runtime — Desktop MVP — 🔄 `gd-0.2`
+### WP-03 — Agent Runtime — Desktop MVP — ✅ code complete · `gd-0.2`
 
 - **Goal:** Desktop agent service that dials out to the orchestrator, executes tasks against local Ollama using **Gruper core's API shape and parameter conventions**, and streams results back.
 - **Steps:**
@@ -92,25 +92,25 @@
 
 ---
 
-### WP-04 — Orchestrator — Task Dispatch — 🔄 `gd-0.2`
+### WP-04 — Orchestrator — Task Dispatch — ✅ code complete · `gd-0.2`
 
 - **Goal:** Orchestrator dispatches an explicit-assignment task to a registered agent and relays the result stream to the submitter.
 - **Steps:**
   1. ✅ `POST /tasks`: submitter auth, `assigned_agent_id`, payload, data class, priority, deadline, timeout_s, correlation_id (idempotency), allowed_tools.
   2. ✅ Dispatcher: `SKIP LOCKED` enqueue on agent-connect; CAS dispatch on submit; task reverts to `pending` if agent offline so reconnect picks it up.
-  3. 🔲 Result relay: forward progress events and final result to submitter's open console WS connection (WP-05).
+  3. ✅ Result relay: forward progress events and final result to submitter's open console WS connection. Implemented in WP-05 — `broadcast_to_user` in `connection_manager.py`; `agent_ws.py` pushes `task_progress` / `task_complete` to the submitter's console.
   4. ✅ Task lifecycle: `pending → dispatched → running → complete | failed | timed_out | dead_letter`.
   5. ✅ Retry: requeue on agent disconnect (`retry_count++`); dead-letter after 3 retries.
   6. ✅ Append to `events` table on task submit, complete, and fail.
   7. ✅ Smoke tests: submit, dispatch-on-connect, ack→running, result→complete/failed, disconnect requeue, idempotency, auth guards. Timeout watchdog background task.
 - **Files:** `orchestrator/dispatcher.py`, `orchestrator/routers/tasks.py`, `orchestrator/ws/agent_ws.py` (task_ack/progress/result handlers + dispatch-on-register + requeue-on-disconnect), `orchestrator/main.py` (tasks router + timeout watchdog), `orchestrator/tests/test_tasks.py`
-- **Exit gate:** End-to-end task completes over the internet relay path. Integration tests pass in CI.
+- **Exit gate:** End-to-end task completes over the internet relay path. Integration tests pass in CI. *(Code + smoke tests complete; live internet-relay leg is validated in WP-06.)*
 
-**Notes (2026-06-29):** `dispatcher.py` and `routers/tasks.py` implemented. `agent_ws.py` extended with `task_ack` → `running`, `progress` → log, `result` → `complete`/`failed` handlers; `dispatch_pending_for_agent` called on register; `requeue_or_deadletter` called on disconnect. `main.py` includes tasks router and timeout watchdog (30 s poll). 13 smoke tests written. Key design: `try_dispatch` atomically claims the task but reverts to `pending` if agent is offline (so `dispatch_pending_for_agent` picks it up on reconnect); SKIP LOCKED CTE used for bulk drain on agent connect; `_MAX_RETRIES = 3`. **Pending:** result relay to console WS (WP-05); real NAT validation (WP-06).
+**Notes (2026-06-29):** `dispatcher.py` and `routers/tasks.py` implemented. `agent_ws.py` extended with `task_ack` → `running`, `progress` → relay, `result` → `complete`/`failed` handlers; `dispatch_pending_for_agent` called on register; `requeue_or_deadletter` called on disconnect. `main.py` includes tasks router and timeout watchdog (30 s poll). 13 smoke tests written. Key design: `try_dispatch` atomically claims the task but reverts to `pending` if agent is offline (so `dispatch_pending_for_agent` picks it up on reconnect); SKIP LOCKED CTE used for bulk drain on agent connect; `_MAX_RETRIES = 3`. **Step 3 (result relay) closed in WP-05** — `progress` and `result` frames now broadcast to the submitter's console WS. **Remaining for the milestone:** live NAT relay validation (WP-06). **Code complete.**
 
 ---
 
-### WP-05 — Manager Console — Minimal Scaffold — 🔄 `gd-0.2`
+### WP-05 — Manager Console — Minimal Scaffold — ✅ scaffold complete · `gd-0.2`
 
 - **Goal:** Tauri v2 + Svelte 5 console scaffold with fleet view stub, task composer, and result view — embedding **Gruper core's conversation UI and Chart.js analytics** directly.
 - **Steps:**
@@ -121,12 +121,12 @@
   5. ✅ **Result view:** conversation bubble rendering (glassmorphism, markdown, streaming progress); live partial-output display from `task_progress` WS events; fetches full result from `GET /v1/tasks/{id}` on completion.
   6. ✅ **Per-agent analytics tab:** Chart.js v4 response-time line chart scoped to selected agent; same visual language and CSV/JSON export as Gruper core.
   7. ✅ **Orchestrator result relay:** `_handle_progress` and `_handle_result` in `agent_ws.py` now broadcast `task_progress` and `task_complete` frames to the submitter's open console WS connections. Completes WP-04 step 3.
-  8. 🔲 CI: `tauri build` smoke test fires after `console/package-lock.json` is committed (generated by `npm install`).
+  8. ✅ CI armed: `console/package-lock.json` committed, so the readiness check now passes and `tauri-action` runs the real NSIS/WiX build on push to `main` and on `v*` tags. Frontend (`npm ci && npm run build`) verified green on Linux; the Windows Rust/bundle leg runs on the first `main` build.
   9. 🔲 Playwright click-through smoke test on the task form.
 - **Files:** `console/src-tauri/tauri.conf.json`, `console/src-tauri/Cargo.toml`, `console/src-tauri/src/main.rs`, `console/src-tauri/src/lib.rs`, `console/src-tauri/capabilities/default.json`, `console/src-tauri/icons/` (32x32, 128x128, 128x128@2x, icon.ico), `console/package.json`, `console/svelte.config.js`, `console/vite.config.ts`, `console/tailwind.config.js`, `console/postcss.config.js`, `console/tsconfig.json`, `console/src/app.html`, `console/src/app.css`, `console/src/routes/+layout.ts`, `console/src/routes/+layout.svelte`, `console/src/routes/+page.svelte`, `console/src/lib/types.ts`, `console/src/lib/api/client.ts`, `console/src/lib/stores/auth.ts`, `console/src/lib/stores/fleet.ts`, `console/src/lib/stores/tasks.ts`, `console/src/lib/ws/console_ws.ts`, `console/src/lib/components/ConnectDialog.svelte`, `console/src/lib/components/AgentCard.svelte`, `console/src/lib/components/TaskComposer.svelte`, `console/src/lib/components/ResultView.svelte`, `console/src/lib/components/AgentAnalytics.svelte`; `orchestrator/ws/console_ws.py` (new), `orchestrator/connection_manager.py` (console tracking added), `orchestrator/ws/agent_ws.py` (relay wired), `orchestrator/main.py` (`/v1/console/ws` mounted)
-- **Exit gate:** Console builds on Linux (`npm install && npm run build && cargo build` in `src-tauri`); submits a task; displays result in the embedded Gruper core result view. CI smoke test fires once `package-lock.json` is committed.
+- **Exit gate:** Console builds on Linux (`npm ci && npm run build` verified green; `cargo build` in `src-tauri` runs in CI); submits a task; displays result in the embedded Gruper core result view. CI build armed now that `package-lock.json` is committed.
 
-**Notes (2026-06-29):** Scaffold complete. Key decisions: `ConsoleWS` reconnects with Gruper core's `[2, 4, 8, 16]s` backoff; `fleet_snapshot` message sent on WS connect so console avoids an extra REST round-trip; `auth.ts` persists JWT in `localStorage` (survives Tauri restarts); inference parameters in `TaskComposer` match Gruper core's ranges exactly (temperature 0-1, top-p 0-1, top-k 1-100, repeat-penalty 0.5-2, max-tokens 128-8192, context-length 512-16384); Chart.js dynamically imported to keep initial bundle small; CSP locked to `connect-src 'self' ws: wss: http: https:` from the first commit. **Pending:** `npm install` → commit `package-lock.json` to activate CI build; Playwright tests; macOS icon (`.icns`) for macOS bundle.
+**Notes (2026-06-29):** Scaffold complete; `package-lock.json` committed (197 packages, lockfileVersion 3); `npm run build` produces a static bundle to `console/build/` with no errors. Key decisions: `ConsoleWS` reconnects with Gruper core's `[2, 4, 8, 16]s` backoff; `fleet_snapshot` message sent on WS connect so console avoids an extra REST round-trip; `auth.ts` persists JWT in `localStorage` (survives Tauri restarts); inference parameters in `TaskComposer` match Gruper core's ranges exactly (temperature 0-1, top-p 0-1, top-k 1-100, repeat-penalty 0.5-2, max-tokens 128-8192, context-length 512-16384); Chart.js dynamically imported to keep initial bundle small; CSP locked to `connect-src 'self' ws: wss: http: https:` from the first commit; `vite` pinned to `^6` to satisfy `@sveltejs/vite-plugin-svelte@5`'s peer requirement (fixed an initial `^5` mismatch). **Pending:** confirm the first Windows installer run is green on `main` (Rust/bundle leg not testable on this Linux host); Playwright click-through; macOS icon (`.icns`) for the macOS bundle. **Scaffold code complete.**
 
 ---
 
@@ -450,6 +450,6 @@ Not assigned to any phase or work packet. Long-term items to keep in mind for la
 
 ---
 
-*Last updated: 2026-06-29 (Phase 0 closed; WP-04 in progress)*
+*Last updated: 2026-06-29 (Phase 0 closed; WP-03/04/05 code complete; WP-06 live relay validation next)*
 *Companion document: `GruperDistributedSpec.md` — architecture diagrams, data models, wire schemas, security threat table, and open questions (OQ-1…OQ-5).*
 *Gruper core baseline: `v0.4.5` (`Gruper.html`) — this roadmap builds on core, not over it.*

@@ -1,6 +1,6 @@
 # Gruper Orchestrator
 
-**Milestone:** `gd-0.2` (WP-04) · **Status:** Task dispatch — submit, dispatch, lifecycle, retry
+**Milestone:** `gd-0.2` (WP-04 + WP-05) · **Status:** Task dispatch + console relay — submit, dispatch, lifecycle, retry, live fleet/task push to the Manager Console
 
 The orchestrator is the relay hub for Gruper Distributed. Agent nodes dial
 *outbound* WebSocket connections to it; the Manager Console manages it over REST.

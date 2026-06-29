@@ -1,7 +1,7 @@
 # Gruper
 
 [![Core Version](https://img.shields.io/badge/core%20version-0.4.5-blue.svg)](Gruper.html)
-[![Distributed](https://img.shields.io/badge/distributed-gd--0.2%20%E2%80%94%20task%20dispatch-orange.svg)](orchestrator/)
+[![Distributed](https://img.shields.io/badge/distributed-gd--0.2%20%E2%80%94%20walking%20skeleton-orange.svg)](orchestrator/)
 [![Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml/badge.svg)](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -116,31 +116,31 @@ A companion system that extends Gruper Core across multiple machines and multipl
 
 ### Current status
 
-**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is underway — task dispatch shipped; Manager Console scaffold in progress.
+**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is underway — task dispatch and the Manager Console scaffold are code complete; the remaining gate is live end-to-end relay validation (WP-06).
 
-**What's shipped (`gd-0.1` / `gd-0.2` in progress):**
+**What's shipped (`gd-0.1` / `gd-0.2`):**
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
-| `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, task dispatch + relay, console WS (WP-04/05) |
+| `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, task dispatch + result relay, console WS (WP-04/05) |
 | `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker |
-| `console/` | 🔄 WP-05 | Tauri v2 + Svelte 5 scaffold complete; run `npm install` to activate CI build |
+| `console/` | ✅ Scaffold complete | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; frontend build verified |
 
-**Manager Console (`gd-0.2` / WP-05) — scaffold shipped:**
+**Manager Console (`gd-0.2` / WP-05) — run it locally:**
 
 ```bash
 cd console
-npm install          # generates package-lock.json — commit this to activate CI build
+npm install          # package-lock.json is committed; this restores the exact tree
 npm run dev          # starts Vite dev server on :5173
-cd src-tauri && cargo build   # verify Rust compiles
+cd src-tauri && cargo build   # verify the Tauri Rust shell compiles
 # Then in a separate terminal:
 npx tauri dev        # launches the desktop app against the running dev server
 ```
 
 To connect the console, start the orchestrator first (`docker compose up` in `orchestrator/`), then enter the orchestrator URL and your public key in the Connect dialog.
 
-**Next:** commit `package-lock.json` to activate CI build (WP-05 step 8), end-to-end relay validation (WP-06).
+**Next:** end-to-end relay validation over a real NAT path (WP-06) — the `gd-0.2` exit gate.
 
 ### Architecture
 
@@ -217,22 +217,27 @@ open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
 
 **Gruper Console (Manager Console)** — the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, and
-on manual dispatch. Every run produces at least one downloadable artifact:
+on manual dispatch. The console scaffold (WP-05) and its committed `package-lock.json`
+mean the readiness check now passes, so the workflow builds **real** installers
+rather than the placeholder:
 
-| State | Artifact | How to get it |
-|-------|----------|---------------|
-| Pre-WP-05 (now) | `gruper-console-…-PLACEHOLDER` → `BUILD-STATUS.txt` explaining current state | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
-| Post-WP-05 | `*-setup.exe` (NSIS) + `*.msi` (WiX) | Same link, or [GitHub Releases](https://github.com/jnowat/gruper/releases) on tagged builds |
+| Build leg | Output | How to get it |
+|-----------|--------|---------------|
+| NSIS | `*-setup.exe` — portable installer, no admin rights | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
+| WiX | `*.msi` — enterprise / Group Policy compatible | Same link |
+| Tagged `v*` | both, attached to a **draft** GitHub Release | [GitHub Releases](https://github.com/jnowat/gruper/releases) — publish manually |
 
-> The workflow becomes active once this branch merges to `main` (GitHub only
-> registers workflows from the default branch). Until then, the run — and its
-> placeholder artifact — is visible on the pull request that introduces it.
+> **Status:** the frontend build (`npm ci && npm run build`) is verified green on
+> Linux and the pipeline is armed. The installers become downloadable once the
+> first build completes on `main` (GitHub registers workflows from the default
+> branch only) — the very first Windows run is the point at which the Rust/bundle
+> leg is confirmed end-to-end.
 
 | Platform | Format | Status |
 |----------|--------|--------|
-| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — workflow active |
-| macOS | `.dmg` | Planned — WP-05 |
-| Linux | `.AppImage` / `.deb` | Planned — WP-05 |
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Build armed — runs on next push to `main` |
+| macOS | `.dmg` | Planned — needs `.icns` icon + macOS runner job |
+| Linux | `.AppImage` / `.deb` | Planned — Linux runner job |
 
 Pre-release builds are unsigned — Windows SmartScreen will show an "Unknown publisher"
 warning on first run. This is expected and will be resolved with a code-signing
