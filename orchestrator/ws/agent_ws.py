@@ -6,6 +6,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from ..connection_manager import manager
 from ..database import append_event, get_pool
+from ..dispatcher import dispatch_pending_for_agent, requeue_or_deadletter
 from ..security import verify_token
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 _MSG_REGISTER  = "register"
 _MSG_HEARTBEAT = "heartbeat"
 _MSG_STATUS    = "status_update"
+_MSG_TASK_ACK  = "task_ack"
+_MSG_PROGRESS  = "progress"
+_MSG_RESULT    = "result"
 
 # Statuses an agent may self-report; "offline" is set by the orchestrator only.
 _SELF_REPORTABLE_STATUSES = frozenset({"idle", "busy", "degraded", "draining"})
@@ -26,9 +30,15 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
       1. Agent connects: GET /v1/agents/ws?token=<jwt>
       2. Agent sends:    {"type": "register", "agent_id": "<uuid>"}
       3. Orchestrator:   {"type": "registered", "agent_id": "<uuid>"}  → status: idle
+                         Orchestrator dispatches any pending tasks immediately.
       4. Agent sends:    {"type": "heartbeat"}  every ~30 s (no response frame)
       5. Agent sends:    {"type": "status_update", "status": "busy|idle|degraded|draining"}
-      6. Disconnect:     status → offline; event appended
+      6. Agent sends:    {"type": "task_ack", "task_id": "<uuid>"}  → task status: running
+      7. Agent sends:    {"type": "progress", "task_id": "<uuid>", "text": "..."}  (log)
+      8. Agent sends:    {"type": "result", "task_id": "<uuid>",
+                          "status": "complete"|"failed",
+                          "result": {...}|null, "error": {...}|null}
+      9. Disconnect:     active tasks requeued or dead-lettered; status → offline
 
     The JWT must be the token issued to the agent's owner via POST /v1/auth/token.
     ed25519 challenge-response replaces the JWT stub at WP-07.
@@ -73,6 +83,24 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
                 else:
                     await _handle_status_update(websocket, pool, agent_id, user_id, msg)
 
+            elif msg_type == _MSG_TASK_ACK:
+                if agent_id is None:
+                    await websocket.send_json({"type": "error", "detail": "send register before task_ack"})
+                else:
+                    await _handle_task_ack(pool, agent_id, msg)
+
+            elif msg_type == _MSG_PROGRESS:
+                if agent_id is None:
+                    await websocket.send_json({"type": "error", "detail": "send register before progress"})
+                else:
+                    await _handle_progress(agent_id, msg)
+
+            elif msg_type == _MSG_RESULT:
+                if agent_id is None:
+                    await websocket.send_json({"type": "error", "detail": "send register before result"})
+                else:
+                    await _handle_result(pool, agent_id, user_id, msg)
+
             else:
                 await websocket.send_json({"type": "error", "detail": f"unknown message type: {msg_type!r}"})
 
@@ -82,6 +110,10 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
         logger.exception("Unexpected error on agent WS (agent_id=%s)", agent_id)
     finally:
         if agent_id:
+            try:
+                await requeue_or_deadletter(pool, agent_id)
+            except Exception:
+                logger.warning("Could not requeue tasks for agent %s", agent_id)
             manager.disconnect(agent_id)
             await _set_status(pool, agent_id, "offline")
             try:
@@ -130,6 +162,10 @@ async def _handle_register(
 
     await websocket.send_json({"type": "registered", "agent_id": agent_id})
     logger.info("Agent %s online (owner=%s)", agent_id, user_id)
+
+    # Drain any tasks that arrived while this agent was offline.
+    await dispatch_pending_for_agent(pool, manager, agent_id)
+
     return agent_id
 
 
@@ -162,6 +198,93 @@ async def _handle_status_update(
         subject_id=agent_id,
         metadata={"status": new_status},
     )
+
+
+async def _handle_task_ack(
+    pool: asyncpg.Pool,
+    agent_id: str,
+    msg: dict,
+) -> None:
+    """Mark a dispatched task as running once the agent acknowledges receipt."""
+    task_id = msg.get("task_id", "")
+    if not task_id:
+        logger.warning("task_ack from agent %s missing task_id", agent_id)
+        return
+    updated = await pool.fetchval(
+        """
+        UPDATE tasks SET status = 'running'
+        WHERE id = $1::uuid
+          AND assigned_agent_id = $2::uuid
+          AND status = 'dispatched'
+        RETURNING id::text
+        """,
+        task_id,
+        agent_id,
+    )
+    if updated:
+        logger.debug("Task %s running on agent %s", task_id, agent_id)
+    else:
+        logger.warning("task_ack ignored for task %s (not dispatched to agent %s)", task_id, agent_id)
+
+
+async def _handle_progress(agent_id: str, msg: dict) -> None:
+    """Log a progress frame from the agent (WP-05 will relay to submitter)."""
+    task_id = msg.get("task_id", "?")
+    text = msg.get("text", "")
+    logger.info("Progress task=%s agent=%s: %s", task_id, agent_id, text[:200])
+
+
+async def _handle_result(
+    pool: asyncpg.Pool,
+    agent_id: str,
+    user_id: str,
+    msg: dict,
+) -> None:
+    """Record a task result (complete or failed) received from the agent."""
+    task_id = msg.get("task_id", "")
+    terminal_status = msg.get("status")
+    if not task_id or terminal_status not in ("complete", "failed"):
+        logger.warning(
+            "Invalid result frame from agent %s: task_id=%r status=%r",
+            agent_id, task_id, terminal_status,
+        )
+        return
+
+    result_payload = msg.get("result")
+    error_payload  = msg.get("error")
+
+    updated = await pool.fetchval(
+        """
+        UPDATE tasks
+        SET status       = $3,
+            completed_at = NOW(),
+            result       = $4::jsonb,
+            error        = $5::jsonb
+        WHERE id                = $1::uuid
+          AND assigned_agent_id = $2::uuid
+          AND status            = 'running'
+        RETURNING id::text
+        """,
+        task_id,
+        agent_id,
+        terminal_status,
+        result_payload,
+        error_payload,
+    )
+    if updated:
+        action = "task.completed" if terminal_status == "complete" else "task.failed"
+        await append_event(
+            pool,
+            actor_id=user_id,
+            action=action,
+            subject_id=task_id,
+            metadata={"agent_id": agent_id},
+        )
+        logger.info("Task %s %s (agent=%s)", task_id, terminal_status, agent_id)
+    else:
+        logger.warning(
+            "result ignored for task %s (not running on agent %s)", task_id, agent_id
+        )
 
 
 async def _set_status(pool: asyncpg.Pool, agent_id: str, status: str) -> None:

@@ -1,7 +1,7 @@
 # Gruper
 
 [![Core Version](https://img.shields.io/badge/core%20version-0.4.5-blue.svg)](Gruper.html)
-[![Distributed](https://img.shields.io/badge/distributed-gd--0.1%20%E2%80%94%20contracts-orange.svg)](spec/contracts/)
+[![Distributed](https://img.shields.io/badge/distributed-gd--0.2%20%E2%80%94%20task%20dispatch-orange.svg)](orchestrator/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Docs:** [User Manual](UserManual.md) · [Distributed Spec](GruperDistributedSpec.md) · [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md)
@@ -13,7 +13,7 @@ Gruper is a local-first multi-agent AI system built on [Ollama](https://ollama.a
 | | **Gruper Core** | **Gruper Distributed** |
 |---|---|---|
 | What it is | Single-file browser app | Desktop console + relay orchestrator |
-| Status | Stable — `v0.4.5` | Pre-v1 — contracts phase (`gd-0.1`) |
+| Status | Stable — `v0.4.5` | Pre-v1 — walking skeleton (`gd-0.2`) |
 | Agents | Up to 6, on one machine | Unlimited, across machines and owners |
 | Sharing | None | Scoped cross-user tokens with instant revocation |
 | Infrastructure | None — open the file | Docker Compose orchestrator + agent runtime |
@@ -98,7 +98,7 @@ Open the file, point it at `http://localhost:11434`, select your models, and sta
 
 ---
 
-## Gruper Distributed — `gd-0.1` (contracts phase)
+## Gruper Distributed — `gd-0.2` (walking skeleton)
 
 A companion system that extends Gruper Core across multiple machines and multiple owners. Core continues to work exactly as it does today — nothing is replaced.
 
@@ -115,29 +115,25 @@ A companion system that extends Gruper Core across multiple machines and multipl
 
 ### Current status
 
-The `gd-0.1` milestone (Wire Contracts & Schema Freeze) is underway. The wire contracts are being frozen before any code is written — an independent implementer can build against them without reopening architecture decisions.
+**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is underway — task dispatch is being wired up now.
 
-**What exists now in `spec/contracts/`:**
+**What's shipped (`gd-0.1` / `gd-0.2` in progress):**
 
-| File | Contents |
-|------|----------|
-| `openapi.yaml` | OpenAPI 3.1 — all REST and WebSocket endpoints |
-| `wss-messages.schema.json` | JSON Schema — full WSS message protocol (16 message types) |
-| `models/user.schema.json` | User identity, ed25519 keypair-anchored |
-| `models/agent.schema.json` | Agent node — capabilities, availability, share policies |
-| `models/task.schema.json` | Task lifecycle, plaintext/encrypted input, result, error |
-| `models/share-token.schema.json` | Share grant — scopes, quotas, conditions, revocation |
-| `models/event.schema.json` | Audit event — append-only, hash-chain fields pre-wired |
-| `core-mapping.md` | Gruper Core v0.4.5 per-agent config → distributed task input |
-| `README.md` | Contracts package index, OQ resolutions, code-generation notes |
+| Component | Status | Notes |
+|-----------|--------|-------|
+| `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
+| `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, agent WS heartbeat, task dispatch (WP-04) |
+| `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker |
+| `console/` | 🔲 WP-05 | Tauri + Svelte scaffold — not started |
 
-Open questions resolved in gd-0.1:
-- **OQ-1** → **Custom ReAct implementation**, consistent with Gruper Core's hand-built philosophy
-- **OQ-2** → **Pattern A — shared multi-tenant orchestrator** for the first release
+**Task dispatch (`gd-0.2` / WP-04) — in progress:**
+- `POST /v1/tasks` — submit task with explicit agent assignment, priority, deadline, idempotency key
+- Dispatcher pushes immediately if agent is online; task stays `pending` for reconnect drain if offline
+- Task lifecycle: `pending → dispatched → running → complete | failed | timed_out | dead_letter`
+- Retry on disconnect (up to 3); dead-letter after max retries
+- Timeout watchdog background task
 
-**Remaining before WP-01 closes:** independent implementer review; WP-02 skeleton orchestrator confirms schemas are buildable.
-
-**Next milestone — `gd-0.2`:** Skeleton orchestrator (WP-02), desktop agent runtime (WP-03), task dispatch (WP-04), minimal console scaffold (WP-05), end-to-end relay validation (WP-06).
+**Next:** console scaffold (WP-05), end-to-end relay validation (WP-06).
 
 ### Architecture
 
@@ -160,8 +156,8 @@ Every agent dials *outbound* WSS to the orchestrator. Nothing connects inward. N
 
 | Milestone | Phase | Status |
 |-----------|-------|--------|
-| `gd-0.1` | Wire Contracts & Schema Freeze | 🔄 In progress |
-| `gd-0.2` | Walking Skeleton — single-owner relay over the internet | 🔲 Next |
+| `gd-0.1` | Wire Contracts & Schema Freeze | ✅ Complete |
+| `gd-0.2` | Walking Skeleton — single-owner relay over the internet | 🔄 In progress |
 | `gd-0.3` | Cross-Network Sharing — scoped tokens, cross-owner dispatch | 🔲 Planned |
 | `gd-0.4` | Cloud Burst — AWS spot fleet with hard cost cap | 🔲 Planned |
 | `gd-0.5` | Security Hardening — sandbox parity, E2E encryption, audit chain | 🔲 Planned |
@@ -192,7 +188,7 @@ Full detail in [ROADMAP.md](ROADMAP.md).
 - [DOMPurify](https://github.com/cure53/DOMPurify) v3.4.11 — XSS protection
 - Ollama `/api/chat` — local inference
 
-**Gruper Distributed** *(planned — no code shipped yet)*
+**Gruper Distributed** *(in progress — `gd-0.2`)*
 - Agent runtime: Python + FastAPI; Rust for security-critical paths
 - Manager Console: Tauri v2 + Svelte 5 + Tailwind
 - Orchestrator: FastAPI + PostgreSQL (Docker Compose)

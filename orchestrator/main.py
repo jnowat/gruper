@@ -9,11 +9,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .connection_manager import manager
 from .database import close_db, get_pool, init_db, run_migrations
-from .routers import agents, auth, health
+from .routers import agents, auth, health, tasks
 from .ws.agent_ws import handle_agent_ws
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
+
+
+async def _timeout_watchdog() -> None:
+    """Background task: mark dispatched/running tasks timed_out when their deadline expires."""
+    while True:
+        await asyncio.sleep(30)
+        pool = get_pool()
+        rows = await pool.fetch(
+            """
+            UPDATE tasks SET status = 'timed_out', completed_at = NOW()
+            WHERE status IN ('dispatched', 'running')
+              AND dispatched_at + (timeout_s * INTERVAL '1 second') < NOW()
+            RETURNING id::text, assigned_agent_id::text
+            """
+        )
+        for row in rows:
+            logger.warning("Task %s timed out (agent=%s)", row["id"], row["assigned_agent_id"])
 
 
 async def _heartbeat_watchdog() -> None:
@@ -44,15 +61,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.pool = pool
 
     watchdog = asyncio.create_task(_heartbeat_watchdog())
+    timeout_watchdog = asyncio.create_task(_timeout_watchdog())
     logger.info("Gruper Orchestrator %s ready", settings.orchestrator_version)
 
     yield
 
     watchdog.cancel()
-    try:
-        await watchdog
-    except asyncio.CancelledError:
-        pass
+    timeout_watchdog.cancel()
+    for t in (watchdog, timeout_watchdog):
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
     await close_db()
     logger.info("Gruper Orchestrator shut down cleanly")
 
@@ -81,6 +101,7 @@ app.add_middleware(
 app.include_router(health.router, prefix="/v1")
 app.include_router(auth.router,   prefix="/v1")
 app.include_router(agents.router, prefix="/v1")
+app.include_router(tasks.router,  prefix="/v1")
 
 
 @app.websocket("/v1/agents/ws")
