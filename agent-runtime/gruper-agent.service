@@ -1,0 +1,47 @@
+# Gruper Agent Runtime — systemd unit file
+#
+# Installation (Linux):
+#
+#   1. Create a dedicated user:
+#        sudo useradd -r -s /usr/sbin/nologin gruper-agent
+#
+#   2. Deploy the runtime:
+#        sudo mkdir -p /opt/gruper-agent
+#        sudo cp -r agent-runtime/. /opt/gruper-agent/
+#        sudo python3 -m venv /opt/gruper-agent/venv
+#        sudo /opt/gruper-agent/venv/bin/pip install -r /opt/gruper-agent/requirements.txt
+#        sudo chown -R gruper-agent:gruper-agent /opt/gruper-agent
+#
+#   3. Fill in credentials:
+#        sudo cp /opt/gruper-agent/.env.example /opt/gruper-agent/.env
+#        sudo nano /opt/gruper-agent/.env   # set AGENT_ID and JWT_TOKEN
+#        sudo chmod 600 /opt/gruper-agent/.env
+#
+#   4. Install and start the service:
+#        sudo cp gruper-agent.service /etc/systemd/system/
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable gruper-agent
+#        sudo systemctl start gruper-agent
+#        sudo journalctl -u gruper-agent -f
+
+[Unit]
+Description=Gruper Agent Runtime (gd-0.1)
+Documentation=https://github.com/jnowat/gruper
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gruper-agent
+Group=gruper-agent
+WorkingDirectory=/opt/gruper-agent
+EnvironmentFile=/opt/gruper-agent/.env
+ExecStart=/opt/gruper-agent/venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gruper-agent
+
+[Install]
+WantedBy=multi-user.target

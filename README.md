@@ -1,6 +1,6 @@
 # Gruper
 
-[![Core Version](https://img.shields.io/badge/core-v0.4.5-blue.svg)](Gruper.html)
+[![Core Version](https://img.shields.io/badge/core%20version-0.4.5-blue.svg)](Gruper.html)
 [![Distributed](https://img.shields.io/badge/distributed-gd--0.1%20%E2%80%94%20contracts-orange.svg)](spec/contracts/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 

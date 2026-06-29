@@ -1,7 +1,7 @@
 # Gruper Distributed — Engineering Roadmap
 
-**Status as of 2026-06-29:** `gd-0.1` — **WP-02 skeleton orchestrator complete; pending CI validation.**
-· WP-01 complete · WP-02 code complete and polished · All milestones planned · OQ-1 and OQ-2 resolved · Wire contracts package (`spec/contracts/`) committed · OQ-3 through OQ-5 deferred to later WPs · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
+**Status as of 2026-06-29:** `gd-0.1` / `gd-0.2` — **WP-02 skeleton orchestrator complete; WP-03 agent runtime code complete.**
+· WP-01 complete · WP-02 code complete and polished · WP-03 code complete (exit gate pending real relay validation) · All milestones planned · OQ-1 and OQ-2 resolved · Wire contracts package (`spec/contracts/`) committed · OQ-3 through OQ-5 deferred to later WPs · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
 
 **Stack:** Agent Runtime — Python + FastAPI; Rust for security-critical paths · Manager Console — Tauri v2 + Svelte 5 + Tailwind · Orchestrator — FastAPI + PostgreSQL (Docker Compose) · Transport — WSS over TLS · Inference — Ollama local-first · Containers — Docker multi-arch (CPU + CUDA)
 
@@ -72,21 +72,23 @@
 
 ---
 
-## Phase 1 — Walking Skeleton — 🔲 `gd-0.2`
+## Phase 1 — Walking Skeleton — 🔄 `gd-0.2`
 
-### WP-03 — Agent Runtime — Desktop MVP — 🔲 `gd-0.2`
+### WP-03 — Agent Runtime — Desktop MVP — 🔄 `gd-0.2`
 
 - **Goal:** Desktop agent service that dials out to the orchestrator, executes tasks against local Ollama using **Gruper core's API shape and parameter conventions**, and streams results back.
 - **Steps:**
-  1. Persistent outbound WSS client with **exponential backoff (2 s / 4 s / 8 s / 16 s) — Gruper core's retry discipline** applied to the orchestrator connection.
-  2. Registration handshake: send capability JSON on connect; receive and store JWT.
-  3. Task execution: receive task JSON → validate authority → call local Ollama (`/api/generate` or `/api/chat`, **Gruper core parameter conventions**) → stream progress and result over WSS.
-  4. Offline queue: SQLite per-agent; drain on reconnect with exponential backoff.
-  5. **Circuit-breaker:** 3 consecutive failures → mark degraded, signal orchestrator to pause routing — mirrors **Gruper core's agent auto-disable pattern**.
-  6. Heartbeat loop (30 s); graceful shutdown with in-flight checkpoint.
-  7. Systemd unit (Linux); launchd plist stub (macOS).
-- **Files:** `agent-runtime/main.py`, `agent-runtime/ollama_client.py`, `agent-runtime/queue.py`, `agent-runtime/agent.db`, `agent-runtime/gruper-agent.service`
+  1. ✅ Persistent outbound WSS client with **exponential backoff (2 s / 4 s / 8 s / 16 s) — Gruper core's retry discipline** applied to the orchestrator connection.
+  2. ✅ Registration handshake: send capability JSON on connect; receive and store JWT.
+  3. ✅ Task execution: receive task JSON → call local Ollama (`/api/chat`, **Gruper core parameter conventions**) → stream progress and result over WSS.
+  4. ✅ Offline queue: SQLite per-agent; drain on reconnect with exponential backoff.
+  5. ✅ **Circuit-breaker:** 3 consecutive failures → mark degraded, signal orchestrator to pause routing — mirrors **Gruper core's agent auto-disable pattern**.
+  6. ✅ Heartbeat loop (30 s); graceful shutdown with in-flight checkpoint.
+  7. ✅ Systemd unit (Linux); launchd plist stub (macOS); NSSM stub (Windows).
+- **Files:** `agent-runtime/main.py`, `agent-runtime/ws_client.py`, `agent-runtime/ollama_client.py`, `agent-runtime/offline_queue.py`, `agent-runtime/circuit_breaker.py`, `agent-runtime/config.py`, `agent-runtime/gruper-agent.service`
 - **Exit gate:** Agent behind consumer NAT connects to VPS-hosted orchestrator; receives pushed task; calls local Ollama; streams result back over the public internet relay path.
+
+**Notes (2026-06-29):** `agent-runtime/` complete. Key decisions: flat module structure (run `python main.py` from `agent-runtime/`); `offline_queue.py` instead of `queue.py` to avoid shadowing the stdlib `queue` module; Ollama options keyed to Gruper core's parameter names (temperature, top_p, top_k, repeat_penalty, num_predict/max_tokens, num_ctx/context_length, seed); circuit breaker threshold = 3 failures (matches core); backoff = [2, 4, 8, 16]s (matches core); heartbeat every 30 s (well under orchestrator's 90 s timeout); in-flight tasks checkpointed to SQLite on SIGINT/SIGTERM; `status_update: degraded` sent when circuit opens, `status_update: idle` on recovery. **Pending:** WP-04 task dispatch needed before relay path is exercisable end-to-end; real NAT traversal validation deferred to WP-06.
 
 ---
 
