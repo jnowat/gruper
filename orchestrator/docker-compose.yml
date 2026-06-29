@@ -1,6 +1,10 @@
 # Run from inside orchestrator/ or from the repo root.
 # The build context is set to the repo root (..) so that the Dockerfile can
 # copy orchestrator/ as a package and "uvicorn orchestrator.main:app" works.
+#
+# Quick start:
+#   cp .env.example .env   # set POSTGRES_PASSWORD and JWT_SECRET
+#   docker compose up
 
 services:
   postgres:
@@ -19,10 +23,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 10s
 
   orchestrator:
     build:
-      context: ..                       # repo root — Dockerfile COPYs orchestrator/ as a package
+      context: ..                        # repo root — Dockerfile COPYs orchestrator/ as a package
       dockerfile: orchestrator/Dockerfile
     restart: unless-stopped
     depends_on:
@@ -34,6 +39,12 @@ services:
       LOG_LEVEL:    ${LOG_LEVEL:-INFO}
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     volumes:
       # Hot reload: mounts repo root so code changes are picked up without rebuild.
       # Remove this volume for production deployments.

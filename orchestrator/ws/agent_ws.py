@@ -1,3 +1,4 @@
+import json
 import logging
 
 import asyncpg
@@ -5,7 +6,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from ..connection_manager import manager
 from ..database import append_event, get_pool
-from ..security import decode_token
+from ..security import verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -14,30 +15,30 @@ _MSG_REGISTER  = "register"
 _MSG_HEARTBEAT = "heartbeat"
 _MSG_STATUS    = "status_update"
 
-# Agent statuses the agent may self-report (offline is set by the orchestrator only)
+# Statuses an agent may self-report; "offline" is set by the orchestrator only.
 _SELF_REPORTABLE_STATUSES = frozenset({"idle", "busy", "degraded", "draining"})
 
 
 async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
-    """Handle the lifecycle of a single agent WebSocket connection.
+    """Handle the full lifecycle of one agent WebSocket connection.
 
     Protocol (agent → orchestrator):
       1. Agent connects: GET /v1/agents/ws?token=<jwt>
       2. Agent sends:    {"type": "register", "agent_id": "<uuid>"}
-      3. Orchestrator:   {"type": "registered", "agent_id": "<uuid>"}   (status → idle)
-      4. Agent sends:    {"type": "heartbeat"}  every ~30 s
+      3. Orchestrator:   {"type": "registered", "agent_id": "<uuid>"}  → status: idle
+      4. Agent sends:    {"type": "heartbeat"}  every ~30 s (no response frame)
       5. Agent sends:    {"type": "status_update", "status": "busy|idle|degraded|draining"}
-      6. Disconnect:     status → offline
+      6. Disconnect:     status → offline; event appended
 
     The JWT must be the token issued to the agent's owner via POST /v1/auth/token.
-    ed25519 challenge-response will replace this in WP-07.
+    ed25519 challenge-response replaces the JWT stub at WP-07.
     """
-    # Validate the token before accepting the upgrade so we can reject it cleanly.
+    # Validate the token before completing the upgrade handshake.
+    # Starlette requires accept() before close(), so we accept then reject.
     try:
-        payload = decode_token(token)
+        payload = verify_token(token)
         user_id: str = payload["sub"]
-    except Exception:
-        # Accept then immediately close — Starlette requires accept() before close().
+    except ValueError:
         await websocket.accept()
         await websocket.close(code=4401, reason="Invalid or expired token")
         return
@@ -49,7 +50,12 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
 
     try:
         while True:
-            msg: dict = await websocket.receive_json()
+            try:
+                msg: dict = await websocket.receive_json()
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "detail": "message must be valid JSON"})
+                continue
+
             msg_type = msg.get("type")
 
             if msg_type == _MSG_REGISTER:
@@ -73,17 +79,23 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
     except WebSocketDisconnect:
         pass
     except Exception:
-        logger.exception("Unexpected error on agent WS for agent %s", agent_id)
+        logger.exception("Unexpected error on agent WS (agent_id=%s)", agent_id)
     finally:
         if agent_id:
             manager.disconnect(agent_id)
             await _set_status(pool, agent_id, "offline")
-            await append_event(pool, actor_id=user_id, action="agent.disconnected", subject_id=agent_id)
-            logger.info("Agent %s disconnected", agent_id)
+            try:
+                await append_event(pool, actor_id=user_id, action="agent.disconnected", subject_id=agent_id)
+            except Exception:
+                logger.warning("Could not append disconnect event for agent %s", agent_id)
+            logger.info("Agent %s offline (owner=%s)", agent_id, user_id)
 
 
 async def _handle_register(
-    websocket: WebSocket, pool: asyncpg.Pool, user_id: str, msg: dict
+    websocket: WebSocket,
+    pool: asyncpg.Pool,
+    user_id: str,
+    msg: dict,
 ) -> str | None:
     agent_id = msg.get("agent_id", "")
     if not agent_id:
@@ -106,6 +118,11 @@ async def _handle_register(
     if row["owner_id"] != user_id:
         await websocket.send_json({"type": "error", "detail": "forbidden"})
         return None
+
+    if manager.is_connected(agent_id):
+        # Agent is reconnecting after a crash or network blip; replace the stale entry.
+        manager.disconnect(agent_id)
+        logger.info("Agent %s re-registering — replacing stale connection", agent_id)
 
     manager.connect(agent_id, websocket)
     await _set_status(pool, agent_id, "idle")

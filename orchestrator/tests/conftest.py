@@ -33,7 +33,11 @@ from orchestrator.main import app  # noqa: E402 — must come after env vars are
 
 
 def _rand_pubkey() -> str:
-    """Return a random base64url-encoded 32-byte value (44 chars, no padding)."""
+    """Return a random base64url-encoded 32-byte value (43 chars, no padding).
+
+    32 bytes → ceil(32 × 4/3) = 44 chars with padding, 43 chars stripped.
+    This satisfies the pubkey min_length=43 constraint from the user/agent schemas.
+    """
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
 
 
@@ -60,7 +64,7 @@ def client() -> TestClient:
 
 @pytest.fixture
 def pubkey() -> str:
-    """Return a random fake ed25519 pubkey (base64url, 43 chars without padding)."""
+    """Return a unique random pubkey per test (base64url, 43 chars, no padding)."""
     return _rand_pubkey()
 
 

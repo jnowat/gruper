@@ -81,7 +81,7 @@ async def register_agent(
 ) -> AgentResponse:
     pool: asyncpg.Pool = request.app.state.pool
 
-    existing = await pool.fetchrow("SELECT id FROM agents WHERE pubkey = $1", body.pubkey)
+    existing = await pool.fetchval("SELECT 1 FROM agents WHERE pubkey = $1", body.pubkey)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
