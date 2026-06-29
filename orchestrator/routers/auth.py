@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from ..database import append_event
@@ -12,28 +12,31 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class TokenRequest(BaseModel):
-    pubkey: str = Field(..., min_length=43, max_length=88)
+    pubkey:       str = Field(..., min_length=43, max_length=88,
+                              description="Base64url-encoded ed25519 public key (no padding)")
     display_name: str = Field(..., min_length=1, max_length=64)
 
 
 class TokenResponse(BaseModel):
-    token: str
+    token:      str
     expires_at: str
-    user_id: str
+    user_id:    str
 
 
-@router.post("/token", response_model=TokenResponse)
+@router.post(
+    "/token",
+    response_model=TokenResponse,
+    summary="Issue a JWT for an agent owner",
+    description=(
+        "Find-or-create a user by pubkey, then issue a HS256 JWT. "
+        "Signature verification is stubbed in gd-0.1 — any caller that supplies "
+        "a valid pubkey receives a token. Full ed25519 challenge-response is added in WP-07."
+    ),
+)
 async def get_token(body: TokenRequest, request: Request) -> TokenResponse:
-    """
-    Find-or-create a user by pubkey, then issue a HS256 JWT.
-
-    Signature verification is stubbed in gd-0.1 (WP-07 adds ed25519 challenge-response).
-    """
     pool = request.app.state.pool
 
-    row = await pool.fetchrow(
-        "SELECT id::text FROM users WHERE pubkey = $1", body.pubkey
-    )
+    row = await pool.fetchrow("SELECT id::text FROM users WHERE pubkey = $1", body.pubkey)
 
     if row:
         user_id = row["id"]
@@ -46,7 +49,7 @@ async def get_token(body: TokenRequest, request: Request) -> TokenResponse:
         )
         user_id = row["id"]
         action = "user.created"
-        logger.info("Created user %s", user_id)
+        logger.info("New user created: %s", user_id)
 
     await append_event(pool, actor_id=user_id, action=action, subject_id=user_id)
 

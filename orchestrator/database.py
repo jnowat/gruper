@@ -1,5 +1,5 @@
+import json
 import logging
-import os
 from pathlib import Path
 
 import asyncpg
@@ -11,9 +11,15 @@ _pool: asyncpg.Pool | None = None
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 
+async def _init_connection(conn: asyncpg.Connection) -> None:
+    """Register JSON/JSONB codecs so asyncpg can accept Python dicts as JSONB parameters."""
+    await conn.set_type_codec("json",  encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+
+
 async def init_db(url: str) -> asyncpg.Pool:
     global _pool
-    _pool = await asyncpg.create_pool(url, min_size=2, max_size=10)
+    _pool = await asyncpg.create_pool(url, min_size=2, max_size=10, init=_init_connection)
     logger.info("Database pool established")
     return _pool
 
@@ -32,16 +38,21 @@ def get_pool() -> asyncpg.Pool:
 
 
 async def run_migrations(pool: asyncpg.Pool) -> None:
+    """Apply any unapplied SQL migration files in order, idempotently.
+
+    Each migration runs inside its own transaction. If the SQL fails, the
+    transaction rolls back and the filename is NOT recorded, so the migration
+    will be retried on the next startup rather than silently skipped.
+    """
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
-                filename TEXT PRIMARY KEY,
+                filename   TEXT        PRIMARY KEY,
                 applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
 
-        migration_files = sorted(MIGRATIONS_DIR.glob("*.sql"))
-        for path in migration_files:
+        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
             filename = path.name
             already_applied = await conn.fetchval(
                 "SELECT 1 FROM schema_migrations WHERE filename = $1", filename
@@ -51,10 +62,11 @@ async def run_migrations(pool: asyncpg.Pool) -> None:
                 continue
 
             sql = path.read_text()
-            await conn.execute(sql)
-            await conn.execute(
-                "INSERT INTO schema_migrations (filename) VALUES ($1)", filename
-            )
+            async with conn.transaction():
+                await conn.execute(sql)
+                await conn.execute(
+                    "INSERT INTO schema_migrations (filename) VALUES ($1)", filename
+                )
             logger.info("Applied migration: %s", filename)
 
 
@@ -67,6 +79,7 @@ async def append_event(
     secondary_subject_id: str | None = None,
     metadata: dict | None = None,
 ) -> str:
+    """Append an audit event and return its UUID string."""
     row = await pool.fetchrow(
         """
         INSERT INTO events (actor_id, action, subject_id, secondary_subject_id, metadata)

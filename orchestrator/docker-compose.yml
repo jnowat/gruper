@@ -1,11 +1,15 @@
+# Run from inside orchestrator/ or from the repo root.
+# The build context is set to the repo root (..) so that the Dockerfile can
+# copy orchestrator/ as a package and "uvicorn orchestrator.main:app" works.
+
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-gruper}
-      POSTGRES_USER: ${POSTGRES_USER:-gruper}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB:       ${POSTGRES_DB:-gruper}
+      POSTGRES_USER:     ${POSTGRES_USER:-gruper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see .env.example}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -18,20 +22,22 @@ services:
 
   orchestrator:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..                       # repo root — Dockerfile COPYs orchestrator/ as a package
+      dockerfile: orchestrator/Dockerfile
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-gruper}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gruper}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JWT_SECRET:   ${JWT_SECRET:?JWT_SECRET is required — see .env.example}
+      LOG_LEVEL:    ${LOG_LEVEL:-INFO}
     ports:
       - "8080:8080"
     volumes:
-      - .:/app   # hot reload — remove for production
+      # Hot reload: mounts repo root so code changes are picked up without rebuild.
+      # Remove this volume for production deployments.
+      - ../:/app
 
 volumes:
   postgres_data:
