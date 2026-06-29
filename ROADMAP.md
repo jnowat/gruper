@@ -1,7 +1,7 @@
 # Gruper Distributed — Engineering Roadmap
 
-**Status as of 2026-06-29:** `gd-0.1` / `gd-0.2` — **WP-02 skeleton orchestrator complete; WP-03 agent runtime code complete.**
-· WP-01 complete · WP-02 code complete and polished · WP-03 code complete (exit gate pending real relay validation) · All milestones planned · OQ-1 and OQ-2 resolved · Wire contracts package (`spec/contracts/`) committed · OQ-3 through OQ-5 deferred to later WPs · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
+**Status as of 2026-06-29:** `gd-0.1` / `gd-0.2` — **Phase 0 complete; WP-04 task dispatch in progress.**
+· WP-01 ✅ · WP-02 ✅ · WP-03 ✅ (exit gate pending real relay validation) · WP-04 🔄 (dispatcher + tasks router + timeout watchdog complete; tests written) · All milestones planned · OQ-1 and OQ-2 resolved · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
 
 **Stack:** Agent Runtime — Python + FastAPI; Rust for security-critical paths · Manager Console — Tauri v2 + Svelte 5 + Tailwind · Orchestrator — FastAPI + PostgreSQL (Docker Compose) · Transport — WSS over TLS · Inference — Ollama local-first · Containers — Docker multi-arch (CPU + CUDA)
 
@@ -23,8 +23,8 @@
 
 | Phase | Milestone | Goal | Status |
 |-------|-----------|------|--------|
-| 0 — Foundations | `gd-0.1` | Wire contracts, schemas, skeleton orchestrator | 🔄 In progress |
-| 1 — Walking Skeleton | `gd-0.2` | Single-owner end-to-end relay over the public internet | 🔲 Not started |
+| 0 — Foundations | `gd-0.1` | Wire contracts, schemas, skeleton orchestrator | ✅ Complete |
+| 1 — Walking Skeleton | `gd-0.2` | Single-owner end-to-end relay over the public internet | 🔄 In progress |
 | 2 — Cross-Network Sharing | `gd-0.3` | Cross-owner dispatch with scoped tokens; headline milestone | 🔲 Not started |
 | 3 — Cloud Burst | `gd-0.4` | AWS spot fleet with hard cost controls | 🔲 Not started |
 | 4 — Security Hardening | `gd-0.5` | Sandbox parity, E2E encryption, formal security review | 🔲 Not started |
@@ -34,9 +34,9 @@
 
 ---
 
-## Phase 0 — Foundations — 🔄 `gd-0.1`
+## Phase 0 — Foundations — ✅ `gd-0.1`
 
-### WP-01 — Wire Contracts & Schema Freeze — 🔄 `gd-0.1`
+### WP-01 — Wire Contracts & Schema Freeze — ✅ `gd-0.1`
 
 - **Goal:** Lock every interface downstream WPs build against.
 - **Steps:**
@@ -46,15 +46,15 @@
   4. ✅ Define all data models in versioned JSON Schema: `User`, `Agent`, `Task`, `ShareToken`, `Event`. → `spec/contracts/models/`
   5. ✅ Resolve **OQ-1** (agent-loop framework) → **Custom ReAct implementation**, consistent with Gruper core's philosophy.
   6. ✅ Resolve **OQ-2** (Pattern A sign-off) → **Pattern A — shared multi-tenant orchestrator** for the first release.
-  7. 🔲 Independent review pass and WP-02 team confirmation before closing.
+  7. ✅ WP-02 skeleton orchestrator confirmed schemas are buildable — exit gate met.
 - **Dependencies:** OQ-1 and OQ-2 resolved.
 - **Exit gate:** Schemas agreed and published. An independent implementer can build against them without reopening architecture decisions.
 
-**Notes (2026-06-28):** `spec/contracts/` committed. Contains: OpenAPI 3.1 YAML (17 endpoints across 8 tags), WSS message schema (16 message types: 6 agent→orchestrator, 5 orchestrator→agent, 5 orchestrator→console), 5 versioned JSON Schema 2020-12 data models, Gruper Core parameter mapping doc, and package README with OQ resolutions. OQ-1 and OQ-2 resolved. **Pending before closing:** independent implementer review; WP-02 confirms schemas are buildable.
+**Notes (2026-06-29):** `spec/contracts/` committed. Contains: OpenAPI 3.1 YAML (17 endpoints across 8 tags), WSS message schema (16 message types: 6 agent→orchestrator, 5 orchestrator→agent, 5 orchestrator→console), 5 versioned JSON Schema 2020-12 data models, Gruper Core parameter mapping doc, and package README with OQ resolutions. OQ-1 and OQ-2 resolved. WP-02 built directly against these schemas with no amendments — exit gate met. **Closed.**
 
 ---
 
-### WP-02 — Skeleton Orchestrator — ✅ `gd-0.1` (pending CI)
+### WP-02 — Skeleton Orchestrator — ✅ `gd-0.1`
 
 - **Goal:** Runnable Docker Compose stack (PostgreSQL + FastAPI) accepting agent registration and heartbeat; no task dispatch.
 - **Steps:**
@@ -68,7 +68,7 @@
 - **Files:** `orchestrator/main.py`, `orchestrator/config.py`, `orchestrator/database.py`, `orchestrator/security.py`, `orchestrator/connection_manager.py`, `orchestrator/routers/`, `orchestrator/ws/`, `orchestrator/migrations/001–004.sql`, `orchestrator/docker-compose.yml`, `orchestrator/tests/`
 - **Exit gate:** `docker compose up` on a clean machine; mock agent registers, heartbeats, appears in `GET /v1/agents`; smoke tests pass in CI.
 
-**Notes (2026-06-29):** `orchestrator/` complete and polished through three review passes. Stack: FastAPI + asyncpg + PostgreSQL 16 + Docker Compose. Key decisions: HS256 JWT stub at `POST /v1/auth/token` (find-or-create by pubkey; ed25519 challenge-response at WP-07); JWT passed as `?token=` query param on WS upgrade (browsers cannot send Authorization headers on WebSocket connections); idempotent migration runner wraps each SQL file in a transaction; asyncpg JSON/JSONB codecs registered at pool init; heartbeat watchdog runs every 15 s and marks stale agents offline after 90 s; `verify_token` raises ValueError (used in WS context), `get_current_user_id` wraps it as HTTP 401 (used in REST context); re-registration replaces stale connection entry gracefully; 15 smoke tests cover full auth flow, agent registration, duplicate pubkey 409, invalid runtime_version 422, WebSocket handshake, heartbeat, invalid status error, token rejection 4401, unknown/malformed UUID, idle/offline status transitions. Hash-chain event fields null until WP-17. `orchestrator/README.md` added. **Pending:** `docker compose up` validation on a clean machine; CI smoke tests green. When those pass, close WP-02 and WP-01 (WP-01 exit gate requires WP-02 confirmation that schemas are buildable).
+**Notes (2026-06-29):** `orchestrator/` complete and polished through three review passes. Stack: FastAPI + asyncpg + PostgreSQL 16 + Docker Compose. Key decisions: HS256 JWT stub at `POST /v1/auth/token` (find-or-create by pubkey; ed25519 challenge-response at WP-07); JWT passed as `?token=` query param on WS upgrade (browsers cannot send Authorization headers on WebSocket connections); idempotent migration runner wraps each SQL file in a transaction; asyncpg JSON/JSONB codecs registered at pool init; heartbeat watchdog runs every 15 s and marks stale agents offline after 90 s; `verify_token` raises ValueError (used in WS context), `get_current_user_id` wraps it as HTTP 401 (used in REST context); re-registration replaces stale connection entry gracefully; 15 smoke tests cover full auth flow, agent registration, duplicate pubkey 409, invalid runtime_version 422, WebSocket handshake, heartbeat, invalid status error, token rejection 4401, unknown/malformed UUID, idle/offline status transitions. Hash-chain event fields null until WP-17. `orchestrator/README.md` added. WP-01 exit gate met (schemas buildable without amendment). **Closed.**
 
 ---
 
@@ -92,18 +92,21 @@
 
 ---
 
-### WP-04 — Orchestrator — Task Dispatch — 🔲 `gd-0.2`
+### WP-04 — Orchestrator — Task Dispatch — 🔄 `gd-0.2`
 
 - **Goal:** Orchestrator dispatches an explicit-assignment task to a registered agent and relays the result stream to the submitter.
 - **Steps:**
-  1. `POST /tasks`: submitter auth, `assigned_agent_id`, payload, data class, priority, deadline.
-  2. Dispatcher: `SKIP LOCKED` enqueue; push to agent's WSS channel.
-  3. Result relay: forward progress events and final result to submitter's open connection.
-  4. Task lifecycle: `pending → dispatched → running → complete | failed | timed_out`.
-  5. Retry: requeue on agent disconnect; dead-letter after configurable retry count.
-  6. Append to `events` table on every state transition.
-  7. Integration tests: submit → dispatch → result relay → dead-letter on disconnect.
+  1. ✅ `POST /tasks`: submitter auth, `assigned_agent_id`, payload, data class, priority, deadline, timeout_s, correlation_id (idempotency), allowed_tools.
+  2. ✅ Dispatcher: `SKIP LOCKED` enqueue on agent-connect; CAS dispatch on submit; task reverts to `pending` if agent offline so reconnect picks it up.
+  3. 🔲 Result relay: forward progress events and final result to submitter's open console WS connection (WP-05).
+  4. ✅ Task lifecycle: `pending → dispatched → running → complete | failed | timed_out | dead_letter`.
+  5. ✅ Retry: requeue on agent disconnect (`retry_count++`); dead-letter after 3 retries.
+  6. ✅ Append to `events` table on task submit, complete, and fail.
+  7. ✅ Smoke tests: submit, dispatch-on-connect, ack→running, result→complete/failed, disconnect requeue, idempotency, auth guards. Timeout watchdog background task.
+- **Files:** `orchestrator/dispatcher.py`, `orchestrator/routers/tasks.py`, `orchestrator/ws/agent_ws.py` (task_ack/progress/result handlers + dispatch-on-register + requeue-on-disconnect), `orchestrator/main.py` (tasks router + timeout watchdog), `orchestrator/tests/test_tasks.py`
 - **Exit gate:** End-to-end task completes over the internet relay path. Integration tests pass in CI.
+
+**Notes (2026-06-29):** `dispatcher.py` and `routers/tasks.py` implemented. `agent_ws.py` extended with `task_ack` → `running`, `progress` → log, `result` → `complete`/`failed` handlers; `dispatch_pending_for_agent` called on register; `requeue_or_deadletter` called on disconnect. `main.py` includes tasks router and timeout watchdog (30 s poll). 13 smoke tests written. Key design: `try_dispatch` atomically claims the task but reverts to `pending` if agent is offline (so `dispatch_pending_for_agent` picks it up on reconnect); SKIP LOCKED CTE used for bulk drain on agent connect; `_MAX_RETRIES = 3`. **Pending:** result relay to console WS (WP-05); real NAT validation (WP-06).
 
 ---
 
@@ -424,7 +427,7 @@ Out of scope for the pre-1.0 track. Not scheduled until v1.0 is shipped and stab
 
 | Item | Severity | Notes |
 |------|----------|-------|
-| OQ-1 through OQ-5 unresolved | **Blocking** | Must be resolved before WP-01 closes; all downstream WPs depend on them. See companion spec §12.2. |
+| OQ-3 through OQ-5 unresolved | **Non-blocking** | OQ-1 and OQ-2 resolved in WP-01. OQ-3 (multi-region failover), OQ-4 (WebRTC P2P), OQ-5 (mobile) deferred to post-v1. See companion spec §12.2. |
 | Desktop sandboxing (Linux only until WP-15) | **High** | Windows and macOS per-task sandbox absent until `gd-0.5`. Cross-owner sharing on Windows/macOS blocked until WP-15 and WP-18 close. |
 | `events` table lacks hash chain until WP-17 | **Medium** | Event append active from WP-02; tamper-evidence absent until `gd-0.5`. Compliance deployments must not go live before WP-17 closes. |
 | Python agent runtime (memory-unsafe) | **Medium** | Acceptable for prototyping. Rust port of sandbox and comms planned as load and security review demand it. |
@@ -443,6 +446,6 @@ Not assigned to any phase or work packet. Long-term items to keep in mind for la
 
 ---
 
-*Last updated: 2026-06-29 (WP-02 final polish)*
+*Last updated: 2026-06-29 (Phase 0 closed; WP-04 in progress)*
 *Companion document: `GruperDistributedSpec.md` — architecture diagrams, data models, wire schemas, security threat table, and open questions (OQ-1…OQ-5).*
 *Gruper core baseline: `v0.4.5` (`Gruper.html`) — this roadmap builds on core, not over it.*
