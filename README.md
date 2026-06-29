@@ -209,13 +209,18 @@ git clone https://github.com/jnowat/gruper.git
 open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
 ```
 
-**Gruper Console (Manager Console)** — the Windows CI workflow runs on every push
-and always produces at least one downloadable artifact:
+**Gruper Console (Manager Console)** — the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
+workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, and
+on manual dispatch. Every run produces at least one downloadable artifact:
 
 | State | Artifact | How to get it |
 |-------|----------|---------------|
-| Pre-WP-05 (now) | `BUILD-STATUS.txt` — explains current state | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
+| Pre-WP-05 (now) | `gruper-console-…-PLACEHOLDER` → `BUILD-STATUS.txt` explaining current state | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
 | Post-WP-05 | `*-setup.exe` (NSIS) + `*.msi` (WiX) | Same link, or [GitHub Releases](https://github.com/jnowat/gruper/releases) on tagged builds |
+
+> The workflow becomes active once this branch merges to `main` (GitHub only
+> registers workflows from the default branch). Until then, the run — and its
+> placeholder artifact — is visible on the pull request that introduces it.
 
 | Platform | Format | Status |
 |----------|--------|--------|
