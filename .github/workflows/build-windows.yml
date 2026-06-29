@@ -1,0 +1,272 @@
+name: Build Windows Installer
+
+# This workflow always produces at least one downloadable artifact:
+#
+#   Path A — console not yet scaffolded (pre WP-05, current state):
+#     Uploads BUILD-STATUS.txt explaining the milestone and expected outputs.
+#     Runs in seconds; no toolchain needed.
+#
+#   Path B — console is scaffolded (post WP-05):
+#     Builds the real NSIS (.exe) and WiX (.msi) installers and uploads them.
+#     On version tags also creates a draft GitHub Release with both attached.
+#
+# Triggers:
+#   push to main        → artifact upload only
+#   tag v*              → artifact upload + draft GitHub Release (publish manually)
+#   pull_request → main → artifact upload (validates the build before merge)
+#   workflow_dispatch   → manual "Run workflow" button in the Actions UI
+#
+# NOTE: workflow_dispatch and the push/tag triggers only take effect once this
+# file lives on the default branch (main). A workflow on a feature branch alone
+# never fires for push-to-main. pull_request runs from the PR head ref, so it is
+# the way to see a run (and the placeholder artifact) before this reaches main.
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Windows x64 — NSIS (.exe) + WiX (.msi)
+    runs-on: windows-latest
+    permissions:
+      contents: write   # needed for tauri-action to create a GitHub Release on tags
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Readiness check ──────────────────────────────────────────────────────
+      # Sets output `ready` to 'true' when the Tauri project exists (post WP-05),
+      # 'false' otherwise. Every subsequent step branches on this output.
+
+      - name: Check console project readiness
+        id: readiness
+        shell: python
+        run: |
+          import os, pathlib
+          ready = (
+              pathlib.Path("console/src-tauri/tauri.conf.json").is_file()
+              and pathlib.Path("console/package.json").is_file()
+          )
+          value = "true" if ready else "false"
+          # Sanitise the ref into a label safe for artifact names. On a
+          # pull_request event github.ref_name is "<PR#>/merge" — the slash is
+          # illegal in upload-artifact names, so collapse it to a dash.
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+          ref_label = ref_name.replace("/", "-") or "build"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"ready={value}\n")
+              fh.write(f"ref_label={ref_label}\n")
+          print(f"Console ready: {value} | ref_label: {ref_label}")
+
+      # ════════════════════════════════════════════════════════════════════════
+      # PATH A — console not yet scaffolded
+      # Always produces a downloadable artifact so the Artifacts section is
+      # never empty.
+      # ════════════════════════════════════════════════════════════════════════
+
+      - name: Create BUILD-STATUS.txt
+        if: ${{ steps.readiness.outputs.ready != 'true' }}
+        shell: python
+        run: |
+          import pathlib
+          out = pathlib.Path("_placeholder")
+          out.mkdir(exist_ok=True)
+          text = "\n".join([
+            "Gruper Console - Windows Installer",
+            "===================================",
+            "",
+            "Status: NOT READY YET - waiting for WP-05",
+            "",
+            "The Manager Console (Tauri v2 + Svelte 5) has not been scaffolded",
+            "yet. Real installers will appear here automatically once",
+            "console/src-tauri/tauri.conf.json lands in the repository.",
+            "",
+            "Milestone : WP-05 - Manager Console Minimal Scaffold (gd-0.2)",
+            "Roadmap   : https://github.com/jnowat/gruper/blob/main/ROADMAP.md",
+            "Downloads : https://github.com/jnowat/gruper#downloads",
+            "",
+            "When ready, this workflow will produce:",
+            "  gruper-console-*-windows-x64-setup.exe  (NSIS portable installer)",
+            "  gruper-console-*-windows-x64.msi         (WiX MSI installer)",
+          ]) + "\n"
+          dest = out / "BUILD-STATUS.txt"
+          dest.write_text(text, encoding="utf-8")
+          print(f"Wrote {dest}:")
+          print(text)
+
+      - name: Upload BUILD-STATUS.txt placeholder
+        if: ${{ steps.readiness.outputs.ready != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-console-windows-PLACEHOLDER
+          path: _placeholder/BUILD-STATUS.txt
+          retention-days: 7
+          if-no-files-found: error   # hard-fail so a missing file is immediately visible
+
+      # ════════════════════════════════════════════════════════════════════════
+      # PATH B — console is scaffolded, run the full Tauri build
+      # ════════════════════════════════════════════════════════════════════════
+
+      - name: Set up Node.js 20
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Manual npm cache (avoids setup-node's cache requiring package-lock.json
+      # to exist before the readiness check runs).
+      - name: Cache npm dependencies
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-windows-${{ hashFiles('console/package-lock.json') }}
+          restore-keys: npm-windows-
+
+      - name: Set up Rust stable (x86_64-pc-windows-msvc)
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      # Cold Rust builds: 15-25 min. Warm cache: under 3 min.
+      - name: Cache Rust build artifacts
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: console/src-tauri -> target
+
+      - name: Install frontend dependencies
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        run: npm ci
+        working-directory: console
+
+      - name: Build Tauri app (Windows x64)
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        id: tauri_build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ── Code signing — unsigned for pre-v1 builds ────────────────────────
+          # Without a certificate Windows SmartScreen shows an "Unknown publisher"
+          # warning on first run. Acceptable for pre-v1 internal testing.
+          #
+          # Self-signed dev certificate:
+          #   openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem \
+          #     -days 365 -nodes -subj "/CN=Gruper Dev"
+          #   openssl pkcs12 -export -out cert.pfx \
+          #     -inkey key.pem -in cert.pem -passout pass:changeme
+          #   base64 -w 0 cert.pfx  →  secret TAURI_SIGNING_PRIVATE_KEY
+          #   export password       →  secret TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          #
+          # Production EV cert (DigiCert / Sectigo / GlobalSign): follow vendor docs.
+          #
+          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: console
+          # nsis → portable NSIS installer (.exe)  — no admin rights required
+          # msi  → WiX MSI installer (.msi)        — enterprise / Group Policy compatible
+          args: --target x86_64-pc-windows-msvc --bundles nsis,msi
+          # tagName is empty for branch-push builds; tauri-action skips release creation then.
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: Gruper Console ${{ github.ref_name }}
+          releaseBody: |
+            See [ROADMAP.md](https://github.com/jnowat/gruper/blob/main/ROADMAP.md) for what changed.
+
+            > **Pre-release:** Gruper Distributed is pre-v1. These builds are for
+            > testing only. Binaries are unsigned — Windows SmartScreen will show
+            > an "Unknown publisher" warning on first run.
+          releaseDraft: true    # always draft; publish manually after reviewing
+          prerelease: true      # all gd-0.x builds are pre-releases
+
+      - name: Debug info (on build failure)
+        if: ${{ steps.readiness.outputs.ready == 'true' && failure() }}
+        shell: bash
+        run: |
+          echo "=== console/ ==="
+          ls -la console/ || echo "(not found)"
+          echo "=== console/src-tauri/ ==="
+          ls -la console/src-tauri/ || echo "(not found)"
+          echo "=== Rust toolchain ==="
+          rustup show && rustup target list --installed
+          echo "=== Node / npm ==="
+          node --version && npm --version
+          echo "=== tauri info ==="
+          cd console && npx tauri info || true
+
+      - name: Upload NSIS installer (.exe)
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-console-${{ steps.readiness.outputs.ref_label }}-windows-x64-setup.exe
+          path: console/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload MSI installer
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-console-${{ steps.readiness.outputs.ref_label }}-windows-x64.msi
+          path: console/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── Job summary ──────────────────────────────────────────────────────────
+      # Always runs. Uses Python to avoid bash/encoding issues on Windows runner.
+
+      - name: Write job summary
+        if: always()
+        shell: python
+        run: |
+          import os
+          ready    = "${{ steps.readiness.outputs.ready }}"
+          ref_type = "${{ github.ref_type }}"
+          ref_name = "${{ github.ref_name }}"
+
+          lines = ["## Gruper Console - Windows Build", ""]
+          if ready != "true":
+              lines += [
+                  "**Status: waiting for WP-05**",
+                  "",
+                  "The Manager Console Tauri project (`console/`) has not been scaffolded yet.",
+                  "**`gruper-console-windows-PLACEHOLDER`** has been uploaded to this run's",
+                  "Artifacts section — download it to see the current milestone status.",
+                  "",
+                  "Real `.exe` and `.msi` installers will appear here automatically once",
+                  "`console/src-tauri/tauri.conf.json` exists in the repository.",
+              ]
+          else:
+              lines += [
+                  "**Status: complete**",
+                  "",
+                  "| Artifact | Format | Notes |",
+                  "|----------|--------|-------|",
+                  "| `*-setup.exe` | NSIS installer | No admin rights required |",
+                  "| `*.msi` | WiX MSI | Enterprise / Group Policy compatible |",
+                  "",
+                  "Artifacts attached to this run (30-day retention).",
+              ]
+              if ref_type == "tag":
+                  lines += [
+                      "",
+                      f"Draft release created for tag `{ref_name}` - publish manually when ready.",
+                  ]
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as fh:
+                  fh.write("\n".join(lines) + "\n")
+          else:
+              print("\n".join(lines))

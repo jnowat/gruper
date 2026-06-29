@@ -2,6 +2,7 @@
 
 [![Core Version](https://img.shields.io/badge/core%20version-0.4.5-blue.svg)](Gruper.html)
 [![Distributed](https://img.shields.io/badge/distributed-gd--0.2%20%E2%80%94%20task%20dispatch-orange.svg)](orchestrator/)
+[![Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml/badge.svg)](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Docs:** [User Manual](UserManual.md) · [Distributed Spec](GruperDistributedSpec.md) · [Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md)
@@ -195,6 +196,41 @@ Full detail in [ROADMAP.md](ROADMAP.md).
 - Transport: WSS over TLS
 - Encryption: X25519 ECDH + ChaCha20-Poly1305 (payload), ed25519 (identity)
 - Schemas: JSON Schema 2020-12, generates Pydantic (FastAPI) and TypeScript (console)
+
+---
+
+## Downloads
+
+**Gruper Core** is a single file — no installer needed:
+
+```bash
+# Clone and open directly
+git clone https://github.com/jnowat/gruper.git
+open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
+```
+
+**Gruper Console (Manager Console)** — the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
+workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, and
+on manual dispatch. Every run produces at least one downloadable artifact:
+
+| State | Artifact | How to get it |
+|-------|----------|---------------|
+| Pre-WP-05 (now) | `gruper-console-…-PLACEHOLDER` → `BUILD-STATUS.txt` explaining current state | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
+| Post-WP-05 | `*-setup.exe` (NSIS) + `*.msi` (WiX) | Same link, or [GitHub Releases](https://github.com/jnowat/gruper/releases) on tagged builds |
+
+> The workflow becomes active once this branch merges to `main` (GitHub only
+> registers workflows from the default branch). Until then, the run — and its
+> placeholder artifact — is visible on the pull request that introduces it.
+
+| Platform | Format | Status |
+|----------|--------|--------|
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Pending WP-05 — workflow active |
+| macOS | `.dmg` | Planned — WP-05 |
+| Linux | `.AppImage` / `.deb` | Planned — WP-05 |
+
+Pre-release builds are unsigned — Windows SmartScreen will show an "Unknown publisher"
+warning on first run. This is expected and will be resolved with a code-signing
+certificate before v1.0.
 
 ---
 
