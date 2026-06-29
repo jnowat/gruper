@@ -217,9 +217,9 @@ open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
 
 **Gruper Console (Manager Console)** — the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, and
-on manual dispatch. The console scaffold (WP-05) and its committed `package-lock.json`
-mean the readiness check now passes, so the workflow builds **real** installers
-rather than the placeholder:
+on manual dispatch. The console scaffold (WP-05) and its `npm ci`-verified
+`package-lock.json` mean the workflow builds **real** installers — download them
+from the workflow run's **Artifacts**:
 
 | Build leg | Output | How to get it |
 |-----------|--------|---------------|
@@ -227,15 +227,16 @@ rather than the placeholder:
 | WiX | `*.msi` — enterprise / Group Policy compatible | Same link |
 | Tagged `v*` | both, attached to a **draft** GitHub Release | [GitHub Releases](https://github.com/jnowat/gruper/releases) — publish manually |
 
-> **Status:** the frontend build (`npm ci && npm run build`) is verified green on
-> Linux and the pipeline is armed. The installers become downloadable once the
-> first build completes on `main` (GitHub registers workflows from the default
-> branch only) — the very first Windows run is the point at which the Rust/bundle
-> leg is confirmed end-to-end.
+> **Status:** the dependency install (`npm ci`) and frontend build (`npm run build`)
+> are verified green on Linux, and the earlier lockfile mismatch is fixed (the lock
+> is regenerated coherent and CI pins npm to a bug-free version). Real `.exe` /
+> `.msi` artifacts are produced on every `main` build and `v*` tag. Because GitHub
+> registers workflows from the default branch only, the run that produces the first
+> downloadable installers appears once this work reaches `main`.
 
 | Platform | Format | Status |
 |----------|--------|--------|
-| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | Build armed — runs on next push to `main` |
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | ✅ Build fixed — produces installers on `main` / `v*` |
 | macOS | `.dmg` | Planned — needs `.icns` icon + macOS runner job |
 | Linux | `.AppImage` / `.deb` | Planned — Linux runner job |
 

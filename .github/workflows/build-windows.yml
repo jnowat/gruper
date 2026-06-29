@@ -127,6 +127,14 @@ jobs:
         with:
           node-version: 20
 
+      # npm 10.9 (bundled with Node 20) has a lockfile-generation bug that emits
+      # an internally inconsistent picomatch entry, which then breaks `npm ci`.
+      # Pin npm to 11.x — it both generates and consumes the lockfile coherently,
+      # matching the version used to produce the committed package-lock.json.
+      - name: Pin npm to a bug-free version
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        run: npm install -g npm@11
+
       # Manual npm cache (avoids setup-node's cache requiring package-lock.json
       # to exist before the readiness check runs).
       - name: Cache npm dependencies
@@ -152,8 +160,13 @@ jobs:
 
       - name: Install frontend dependencies
         if: ${{ steps.readiness.outputs.ready == 'true' }}
-        run: npm ci
         working-directory: console
+        run: |
+          node --version
+          npm --version
+          # `npm ci` enforces that package.json and package-lock.json are in sync;
+          # it fails loudly (rather than silently mutating the lock) if they drift.
+          npm ci --no-audit --no-fund
 
       - name: Build Tauri app (Windows x64)
         if: ${{ steps.readiness.outputs.ready == 'true' }}
