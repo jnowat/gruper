@@ -215,11 +215,12 @@ git clone https://github.com/jnowat/gruper.git
 open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
 ```
 
-**Gruper Console (Manager Console)** — the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
+**Gruper Console (Manager Console)** — Windows installers are now available. The
+[Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, and
-on manual dispatch. The console scaffold (WP-05) and its `npm ci`-verified
-`package-lock.json` mean the workflow builds **real** installers — download them
-from the workflow run's **Artifacts**:
+on manual dispatch. The console scaffold (WP-05) compiles end-to-end, so the
+workflow builds **real** installers — download them from the workflow run's
+**Artifacts**:
 
 | Build leg | Output | How to get it |
 |-----------|--------|---------------|
@@ -227,17 +228,24 @@ from the workflow run's **Artifacts**:
 | WiX | `*.msi` — enterprise / Group Policy compatible | Same link |
 | Tagged `v*` | both, attached to a **draft** GitHub Release | [GitHub Releases](https://github.com/jnowat/gruper/releases) — publish manually |
 
-> **Status:** the dependency install (`npm ci`) and frontend build (`npm run build`)
-> are verified green on Linux, and the earlier lockfile mismatch is fixed (the lock
-> is regenerated coherent and CI pins npm to a bug-free version). Real `.exe` /
-> `.msi` artifacts are produced on every `main` build and `v*` tag. Because GitHub
-> registers workflows from the default branch only, the run that produces the first
-> downloadable installers appears once this work reaches `main`.
+The `.exe` (NSIS) and `.msi` (WiX) installers are built on **GitHub Actions'
+Windows runner** — native Windows MSVC binaries cannot be cross-compiled from
+Linux or macOS, so the installers come from CI rather than a local build.
+
+> **Status:** The console scaffold builds end-to-end. Both the frontend
+> (`npm ci && npm run build && npm run check`) **and** the Tauri Rust shell
+> (`cargo build` in `src-tauri/`, including the `tauri::generate_context!` icon and
+> asset validation) compile green on Linux. The Tauri v2 library-naming bug that
+> previously broke the Windows compile — `gruper_console_lib` unresolved, because
+> `Cargo.toml` had no explicit `[lib]` section — is fixed, and the bundle icons are
+> now valid RGBA. GitHub registers the workflow from the default branch, so the
+> first downloadable `.exe` / `.msi` appear on the first Windows run after this
+> reaches `main`; subsequent `main` builds and `v*` tags produce them on every run.
 
 | Platform | Format | Status |
 |----------|--------|--------|
-| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | ✅ Build fixed — produces installers on `main` / `v*` |
-| macOS | `.dmg` | Planned — needs `.icns` icon + macOS runner job |
+| Windows x64 | `.exe` (NSIS) + `.msi` (WiX) | ✅ Build fixed — compiles + bundles on the Windows CI runner |
+| macOS | `.dmg` | Planned — `.icns` icon now generated; needs macOS runner job |
 | Linux | `.AppImage` / `.deb` | Planned — Linux runner job |
 
 Pre-release builds are unsigned — Windows SmartScreen will show an "Unknown publisher"

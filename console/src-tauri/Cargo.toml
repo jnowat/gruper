@@ -5,6 +5,16 @@ edition = "2021"
 description = "Gruper Distributed Manager Console"
 license = "MIT"
 
+# The Tauri app logic lives in a library crate (src/lib.rs) so it can be shared
+# between the desktop binary (src/main.rs) and future mobile targets. The `_lib`
+# suffix is required: without an explicit [lib] name the library would default to
+# the package name `gruper_console`, which then collides with the binary of the
+# same name on Windows (rust-lang/cargo#8519). The binary in src/main.rs calls
+# `gruper_console_lib::run()`.
+[lib]
+name = "gruper_console_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
