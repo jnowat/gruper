@@ -217,10 +217,12 @@ open gruper/Gruper.html   # macOS — or double-click on Windows/Linux
 
 **Gruper Console (Manager Console)** — Windows installers are now available. The
 [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
-workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, and
-on manual dispatch. The console scaffold (WP-05) compiles end-to-end, so the
-workflow builds **real** installers — download them from the workflow run's
-**Artifacts**:
+workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, on
+`claude/**` feature-branch pushes (so development branches produce installers
+without opening a PR), and on manual dispatch. The console scaffold (WP-05)
+compiles end-to-end, so the workflow builds **real** installers — download them
+from the workflow run's **Artifacts**. Every run leaves a downloadable artifact:
+the installers on success, or a `BUILD-DIAGNOSTICS.txt` if the build fails.
 
 | Build leg | Output | How to get it |
 |-----------|--------|---------------|
