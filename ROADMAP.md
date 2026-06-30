@@ -1,7 +1,7 @@
 # Gruper Distributed — Engineering Roadmap
 
-**Status as of 2026-06-29:** `gd-0.1` / `gd-0.2` — **Phase 0 complete; WP-03/04/05 code complete; WP-06 live relay validation is the remaining `gd-0.2` gate.**
-· WP-01 ✅ · WP-02 ✅ · WP-03 ✅ code complete (live relay leg in WP-06) · WP-04 ✅ code complete (dispatcher + tasks router + timeout watchdog + smoke tests + result relay) · WP-05 ✅ complete (console + console WS relay; `npm ci`/build/check **and** native `cargo build` green on Linux; Windows console build fixed — Tauri v2 `[lib]` naming + RGBA icons) · WP-06 🔄 next · OQ-1 and OQ-2 resolved · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
+**Status as of 2026-06-30:** `gd-0.1` / `gd-0.2` — **Phase 0 complete; WP-03/04/05 code complete; WP-06 automated end-to-end relay validation is green (17/17 — five dispatch-contract bugs found and fixed). The remaining `gd-0.2` gate is the real two-machine public-internet/NAT field run (runbook in [`docs/WP-06-Validation.md`](docs/WP-06-Validation.md)).**
+· WP-01 ✅ · WP-02 ✅ · WP-03 ✅ code complete (live relay leg in WP-06) · WP-04 ✅ code complete (dispatcher + tasks router + timeout watchdog + smoke tests + result relay) · WP-05 ✅ complete (console + console WS relay; `npm ci`/build/check **and** native `cargo build` green on Linux; Windows console build fixed — Tauri v2 `[lib]` naming + RGBA icons) · WP-06 ✅ automated E2E relay validated (17/17; 5 dispatch-contract bugs found & fixed; SC-2 ~10 ms) · 🔲 real two-machine NAT field run pending for full `gd-0.2` sign-off · OQ-1 and OQ-2 resolved · **v1.0 is a future finish line gated on SC-1…SC-7; it has not been reached.**
 
 **Stack:** Agent Runtime — Python + FastAPI; Rust for security-critical paths · Manager Console — Tauri v2 + Svelte 5 + Tailwind · Orchestrator — FastAPI + PostgreSQL (Docker Compose) · Transport — WSS over TLS · Inference — Ollama local-first · Containers — Docker multi-arch (CPU + CUDA)
 
@@ -24,7 +24,7 @@
 | Phase | Milestone | Goal | Status |
 |-------|-----------|------|--------|
 | 0 — Foundations | `gd-0.1` | Wire contracts, schemas, skeleton orchestrator | ✅ Complete |
-| 1 — Walking Skeleton | `gd-0.2` | Single-owner end-to-end relay over the public internet | 🔄 In progress |
+| 1 — Walking Skeleton | `gd-0.2` | Single-owner end-to-end relay over the public internet | 🔄 Automated E2E relay green; real-NAT field run pending |
 | 2 — Cross-Network Sharing | `gd-0.3` | Cross-owner dispatch with scoped tokens; headline milestone | 🔲 Not started |
 | 3 — Cloud Burst | `gd-0.4` | AWS spot fleet with hard cost controls | 🔲 Not started |
 | 4 — Security Hardening | `gd-0.5` | Sandbox parity, E2E encryption, formal security review | 🔲 Not started |
@@ -130,15 +130,16 @@
 
 ---
 
-### WP-06 — End-to-End Relay Validation — 🔲 `gd-0.2` exit gate
+### WP-06 — End-to-End Relay Validation — ✅ automated E2E green · 🔲 field NAT run pending · `gd-0.2` exit gate
 
 - **Goal:** Prove the outbound-relay model stable over the public internet before sharing complexity is added.
 - **Steps:**
-  1. Orchestrator on VPS (Docker Compose); agent on workstation behind consumer NAT — no port forwarding.
-  2. Submit 20 tasks; measure dispatch overhead (target < 10 s excluding model execution; SC-2 baseline).
-  3. Simulate agent disconnect mid-task; verify requeue and completion on reconnect.
-  4. Simulate orchestrator restart; verify agent reconnects with exponential backoff and drains queue without data loss.
-- **Exit gate:** SC-5 met for single-owner case. SC-2 baseline documented. Relay model proven before WP-07 builds on it.
+  1. 🔲 Orchestrator on VPS (Docker Compose); agent on workstation behind consumer NAT — no port forwarding. *(Field run — runbook in [`docs/WP-06-Validation.md`](docs/WP-06-Validation.md) §7. The relay is outbound-only, so this needs no router config; topology validated on loopback, real hardware pending.)*
+  2. ✅ Submit tasks; measure dispatch overhead (target < 10 s excluding model execution; SC-2 baseline). **Measured: p50 ~10 ms, max ~14 ms** over 10-task batches — ~700× under budget on loopback.
+  3. ✅ Simulate agent disconnect mid-task; verify requeue and completion on reconnect. **SIGKILL mid-stream → orchestrator requeues (`pending`, `retry_count=1`) → restart → drains on reconnect → `complete`.**
+  4. 🔲 Simulate orchestrator restart; verify agent reconnects with exponential backoff and drains queue without data loss. *(Agent backoff-reconnect loop exercised; dedicated orchestrator-bounce scenario deferred to the field run.)*
+- **Automated validation (2026-06-30):** a committed end-to-end harness ([`tests/e2e/wp06_relay_validation.py`](tests/e2e/wp06_relay_validation.py)) drives the **real** relay — real orchestrator under uvicorn + real PostgreSQL + the real agent-runtime making its outbound WS connection + a mock Ollama — and is **17/17 green, reproduced across four runs** (including a fresh-container rebuild; dispatch overhead p50 ~10–13 ms). Running it end to end for the first time exposed **five contract bugs that meant dispatch had never actually worked** (agent read a non-existent top-level `task_id` instead of `task.id`; never sent `task_ack`; sent `progress.chunk`/string `result` instead of the `partial_output` / `{output,…}` shapes; never built an Ollama `messages` array from the task input; and the orchestrator never broadcast live `fleet_event`). All five fixed in `agent-runtime/ws_client.py` and `orchestrator/ws/agent_ws.py`. Full report: [`docs/WP-06-Validation.md`](docs/WP-06-Validation.md).
+- **Exit gate:** SC-2 baseline documented ✅. Relay model proven at the protocol/logic level ✅ (automated E2E). **Remaining for full `gd-0.2` sign-off:** the real two-machine public-internet/NAT field run (§7 runbook) — SC-5 single-owner case on real hardware.
 
 ---
 
@@ -450,6 +451,6 @@ Not assigned to any phase or work packet. Long-term items to keep in mind for la
 
 ---
 
-*Last updated: 2026-06-29 (Phase 0 closed; WP-03/04/05 code complete; WP-06 live relay validation next)*
+*Last updated: 2026-06-30 (WP-06 automated end-to-end relay validation green — 17/17, five dispatch-contract bugs fixed; real two-machine NAT field run is the remaining `gd-0.2` gate)*
 *Companion document: `GruperDistributedSpec.md` — architecture diagrams, data models, wire schemas, security threat table, and open questions (OQ-1…OQ-5).*
 *Gruper core baseline: `v0.4.5` (`Gruper.html`) — this roadmap builds on core, not over it.*

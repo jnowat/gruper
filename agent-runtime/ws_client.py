@@ -20,6 +20,7 @@ checkpointed to the offline queue so they are retried on reconnect.
 import asyncio
 import json
 import logging
+import time
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -148,13 +149,18 @@ class AgentWSClient:
 
         msg_type = msg.get("type")
         if msg_type == "task_push":
-            task_id = msg.get("task_id", "")
+            # The orchestrator sends {"type":"task_push","task":{...},"ack_deadline_s":N}.
+            # The task UUID is task["id"] — there is no top-level "task_id" field.
+            task = msg.get("task") or {}
+            task_id = task.get("id", "")
             if not task_id:
-                logger.warning("task_push received with no task_id — ignored")
+                logger.warning("task_push received with no task.id — ignored")
                 return
-            task = asyncio.create_task(self._run_task(task_id, msg, from_queue=False))
-            self._in_flight[task_id] = task
-            task.add_done_callback(lambda _: self._in_flight.pop(task_id, None))
+            runner = asyncio.create_task(self._run_task(task_id, task, from_queue=False))
+            self._in_flight[task_id] = runner
+            runner.add_done_callback(lambda _: self._in_flight.pop(task_id, None))
+        elif msg_type in ("registered", "heartbeat_ack"):
+            pass  # 'registered' is consumed in _register; heartbeat_ack needs no action
         elif msg_type == "error":
             logger.warning("Orchestrator error: %s", msg.get("detail"))
         else:
@@ -163,29 +169,53 @@ class AgentWSClient:
     # ── Task execution ────────────────────────────────────────────────────────
 
     async def _run_task(
-        self, task_id: str, payload: dict, *, from_queue: bool
+        self, task_id: str, task: dict, *, from_queue: bool
     ) -> None:
+        """Execute one task: ack → stream from Ollama → report result.
+
+        `task` is the full Task record from the orchestrator's task_push
+        (task["input"] is a TaskInputPlaintext: prompt/system_prompt/
+        role_template/model_preferences). The same shape is checkpointed to the
+        offline queue, so drained tasks re-enter here unchanged.
+        """
         if self._cb.is_open:
             logger.warning("Circuit open — queuing task %s", task_id)
             if not from_queue:
-                await self._queue.enqueue(task_id, payload)
+                await self._queue.enqueue(task_id, task)
             return
 
-        model = payload.get("model", "llama3.1:8b")
-        messages = payload.get("messages", [])
-        options = payload.get("options", {})
+        # Acknowledge receipt FIRST: the orchestrator only transitions the task
+        # dispatched → running on task_ack, and rejects results for tasks that
+        # are not 'running'. Skipping this silently drops the result.
+        await self._send({"type": "task_ack", "task_id": task_id})
+
+        task_input = task.get("input") or {}
+        model, options = self._model_and_options(task_input)
+        messages = self._build_messages(task_input)
+        started = time.monotonic()
 
         try:
             parts: list[str] = []
             async for chunk in self._ollama.chat(messages, model=model, options=options):
                 parts.append(chunk)
-                await self._send({"type": "progress", "task_id": task_id, "chunk": chunk})
+                await self._send({
+                    "type": "progress",
+                    "task_id": task_id,
+                    "partial_output": chunk,
+                    "elapsed_ms": int((time.monotonic() - started) * 1000),
+                    "tokens_so_far": len(parts),
+                })
 
             await self._send({
                 "type": "result",
                 "task_id": task_id,
-                "result": "".join(parts),
                 "status": "complete",
+                "result": {
+                    "output": "".join(parts),
+                    "model_used": model,
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                    "tokens_used": len(parts),
+                },
             })
             await self._cb.record_success()
             if from_queue:
@@ -194,20 +224,59 @@ class AgentWSClient:
         except asyncio.CancelledError:
             # Checkpoint for retry on reconnect.
             if not from_queue:
-                await self._queue.enqueue(task_id, payload)
+                await self._queue.enqueue(task_id, task)
             raise
 
         except Exception as exc:
             logger.error("Task %s failed: %s", task_id, exc)
             await self._cb.record_failure()
             if not from_queue:
-                await self._queue.enqueue(task_id, payload)
+                await self._queue.enqueue(task_id, task)
             await self._send({
                 "type": "result",
                 "task_id": task_id,
                 "status": "failed",
-                "error": str(exc),
+                "error": {"code": "ollama_error", "message": str(exc)},
             })
+
+    # Gruper core model_preferences → Ollama option fields (see ollama_client.py
+    # and spec/contracts/core-mapping.md for the canonical mapping).
+    _OPTION_MAP = {
+        "temperature":    "temperature",
+        "top_p":          "top_p",
+        "top_k":          "top_k",
+        "repeat_penalty": "repeat_penalty",
+        "max_tokens":     "num_predict",
+        "context_length": "num_ctx",
+        "seed":           "seed",
+    }
+
+    def _model_and_options(self, task_input: dict) -> tuple[str, dict]:
+        prefs = task_input.get("model_preferences") or {}
+        model = prefs.get("name") or "llama3.1:8b"
+        options = {
+            ollama_key: prefs[core_key]
+            for core_key, ollama_key in self._OPTION_MAP.items()
+            if prefs.get(core_key) is not None
+        }
+        return model, options
+
+    @staticmethod
+    def _build_messages(task_input: dict) -> list[dict]:
+        """Build the Ollama messages array from a TaskInputPlaintext.
+
+        system_prompt (or a role-template-derived default) becomes the system
+        message; prompt becomes the final user message — matching the contract
+        described in task.schema.json.
+        """
+        system = task_input.get("system_prompt")
+        if not system:
+            role = task_input.get("role_template", "analyst")
+            system = f"You are a focused {role} assistant. Respond concisely."
+        return [
+            {"role": "system", "content": system},
+            {"role": "user", "content": task_input.get("prompt", "")},
+        ]
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

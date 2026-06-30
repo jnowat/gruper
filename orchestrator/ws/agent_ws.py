@@ -22,6 +22,51 @@ _MSG_RESULT    = "result"
 # Statuses an agent may self-report; "offline" is set by the orchestrator only.
 _SELF_REPORTABLE_STATUSES = frozenset({"idle", "busy", "degraded", "draining"})
 
+# Maps an agent status to the fleet_event "event" label the console renders.
+# (see ConsoleFleetEventMessage in spec/contracts/wss-messages.schema.json)
+_STATUS_EVENT = {
+    "idle":     "agent_recovered",
+    "busy":     "agent_heartbeat",
+    "degraded": "agent_degraded",
+    "draining": "agent_draining",
+    "offline":  "agent_offline",
+}
+
+
+async def _broadcast_fleet_event(
+    pool: asyncpg.Pool, agent_id: str, owner_id: str, event: str, status: str
+) -> None:
+    """Push a fleet_event to every console owned by the agent's owner.
+
+    Keeps the console fleet view live without polling: agents that connect,
+    change status, or drop off after the initial fleet_snapshot are reflected
+    immediately. Best-effort — a console with no open WS simply misses it.
+    """
+    try:
+        row = await pool.fetchrow(
+            "SELECT name, location_tag, last_seen::text FROM agents WHERE id = $1::uuid",
+            agent_id,
+        )
+        running = await pool.fetchval(
+            "SELECT COUNT(*) FROM tasks "
+            "WHERE assigned_agent_id = $1::uuid AND status IN ('dispatched', 'running')",
+            agent_id,
+        )
+        await manager.broadcast_to_user(owner_id, {
+            "type": "fleet_event",
+            "payload": {
+                "agent_id": agent_id,
+                "event": event,
+                "status": status,
+                "name": row["name"] if row else None,
+                "location_tag": row["location_tag"] if row else None,
+                "running_task_count": int(running or 0),
+                "last_seen": row["last_seen"] if row else None,
+            },
+        })
+    except Exception:
+        logger.warning("Could not broadcast fleet_event for agent %s", agent_id)
+
 
 async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
     """Handle the full lifecycle of one agent WebSocket connection.
@@ -120,6 +165,7 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
                 await append_event(pool, actor_id=user_id, action="agent.disconnected", subject_id=agent_id)
             except Exception:
                 logger.warning("Could not append disconnect event for agent %s", agent_id)
+            await _broadcast_fleet_event(pool, agent_id, user_id, "agent_offline", "offline")
             logger.info("Agent %s offline (owner=%s)", agent_id, user_id)
 
 
@@ -163,6 +209,10 @@ async def _handle_register(
     await websocket.send_json({"type": "registered", "agent_id": agent_id})
     logger.info("Agent %s online (owner=%s)", agent_id, user_id)
 
+    # Tell the owner's console(s) the agent is live now (the initial
+    # fleet_snapshot was sent when the console connected, possibly before this).
+    await _broadcast_fleet_event(pool, agent_id, user_id, "agent_registered", "idle")
+
     # Drain any tasks that arrived while this agent was offline.
     await dispatch_pending_for_agent(pool, manager, agent_id)
 
@@ -197,6 +247,10 @@ async def _handle_status_update(
         action="agent.status_changed",
         subject_id=agent_id,
         metadata={"status": new_status},
+    )
+    await _broadcast_fleet_event(
+        pool, agent_id, user_id,
+        _STATUS_EVENT.get(new_status, "agent_heartbeat"), new_status,
     )
 
 

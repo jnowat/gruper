@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+
+# Local env files (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Agent runtime offline-queue SQLite DB (created at runtime)
+agent.db
+*.sqlite
+*.sqlite3
+
+# WP-06 end-to-end harness scratch (logs, results, per-run DBs)
+/tmp/wp06/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
