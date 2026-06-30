@@ -8,9 +8,10 @@ public-internet/NAT field run pending (runbook in §7).
 > **TL;DR** — The full relay (console → orchestrator → agent → Ollama → back to
 > console) was driven end to end with real processes and real WebSockets. Doing
 > so surfaced **five contract bugs that meant the happy path had never actually
-> worked**; all five are fixed. After the fixes the harness is **17/17 green**,
-> with dispatch overhead of **~10 ms (p50) / ~14 ms (max)** — about three orders
-> of magnitude under the SC-2 target of < 5–10 s.
+> worked**; all five are fixed. After the fixes the harness is **17/17 green,
+> reproduced across four runs** (including a fresh-container rebuild), with
+> dispatch overhead of **~10–13 ms (p50)** — roughly **800–1000× under** the
+> SC-2 target of < 5–10 s.
 
 ---
 
@@ -156,19 +157,25 @@ execution, which is the SC-2 definition.
 
 | Metric | Value |
 |--------|-------|
-| Dispatch overhead — p50 | **10.3 ms** |
-| Dispatch overhead — max (10 tasks) | **13.9 ms** |
-| Dispatch overhead — mean | 10.6 ms |
-| First `task_progress` to console | 181 ms |
-| Full task round-trip (submit → `complete`, mean) | 577 ms |
+Numbers below are the range observed across **four green runs** (including one in
+a freshly rebuilt container), each a 10-task batch:
 
-**SC-2 target: < 5–10 s dispatch overhead. Observed: ~10 ms — roughly 700×
-under budget** (loopback; a real WAN adds one network RTT, typically tens of ms,
-which keeps it comfortably within target). The ~577 ms round-trip is dominated by
+| Metric | Observed |
+|--------|----------|
+| Dispatch overhead — p50 | **~10–13 ms** |
+| Dispatch overhead — mean | ~10–19 ms |
+| Dispatch overhead — worst single task | **64 ms** (occasional cold outlier) |
+| First `task_progress` to console | ~180–250 ms |
+| Full task round-trip (submit → `complete`, mean) | ~570–615 ms |
+
+**SC-2 target: < 5–10 s dispatch overhead. Observed p50 ~10–13 ms — roughly
+800–1000× under the 10 s ceiling**, with even the worst single task (64 ms)
+~150× under it (loopback; a real WAN adds one network RTT, typically tens of ms,
+which keeps it comfortably within target). The ~0.6 s round-trip is dominated by
 the mock model's deliberate streaming delay (6 chunks × ~80 ms), not orchestration.
 
 Raw numbers: `tests/e2e` writes a JSON summary (`--json`) with the full check
-list and metrics for each run.
+list and metrics for each run; the result was reproduced 4/4 (all 17/17 green).
 
 ---
 
