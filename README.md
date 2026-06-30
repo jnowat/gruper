@@ -116,7 +116,7 @@ A companion system that extends Gruper Core across multiple machines and multipl
 
 ### Current status
 
-**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is underway — task dispatch and the Manager Console scaffold are code complete; the remaining gate is live end-to-end relay validation (WP-06).
+**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is nearly there — task dispatch, the Manager Console scaffold, **and end-to-end relay validation (WP-06)** are done. The automated E2E harness drives the real relay (console → orchestrator → agent → Ollama → back) and is **17/17 green**; running it for the first time surfaced and fixed five message-contract bugs that had silently prevented dispatch from ever working. The one remaining `gd-0.2` gate is the real two-machine public-internet/NAT field run — see the [WP-06 validation report](docs/WP-06-Validation.md).
 
 **What's shipped (`gd-0.1` / `gd-0.2`):**
 
@@ -124,8 +124,9 @@ A companion system that extends Gruper Core across multiple machines and multipl
 |-----------|--------|-------|
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
 | `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, task dispatch + result relay, console WS (WP-04/05) |
-| `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker |
+| `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker; dispatch contract aligned + validated in WP-06 |
 | `console/` | ✅ Scaffold complete | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; frontend build verified |
+| end-to-end relay | ✅ Automated E2E green | `tests/e2e/` drives the real relay 17/17; real-NAT field run pending ([WP-06 report](docs/WP-06-Validation.md)) |
 
 **Manager Console (`gd-0.2` / WP-05) — run it locally:**
 
@@ -140,7 +141,7 @@ npx tauri dev        # launches the desktop app against the running dev server
 
 To connect the console, start the orchestrator first (`docker compose up` in `orchestrator/`), then enter the orchestrator URL and your public key in the Connect dialog.
 
-**Next:** end-to-end relay validation over a real NAT path (WP-06) — the `gd-0.2` exit gate.
+**Next:** the real two-machine public-internet/NAT field run — the last `gd-0.2` exit-gate step. The relay logic, dispatch, requeue-on-disconnect, and live console event stream are already validated by the committed [`tests/e2e`](tests/e2e) harness ([report](docs/WP-06-Validation.md)); the field run confirms it on real hardware over `wss://`.
 
 ### Architecture
 
@@ -164,7 +165,7 @@ Every agent dials *outbound* WSS to the orchestrator. Nothing connects inward. N
 | Milestone | Phase | Status |
 |-----------|-------|--------|
 | `gd-0.1` | Wire Contracts & Schema Freeze | ✅ Complete |
-| `gd-0.2` | Walking Skeleton — single-owner relay over the internet | 🔄 In progress |
+| `gd-0.2` | Walking Skeleton — single-owner relay over the internet | 🔄 Automated E2E relay green (17/17); real-NAT field run pending |
 | `gd-0.3` | Cross-Network Sharing — scoped tokens, cross-owner dispatch | 🔲 Planned |
 | `gd-0.4` | Cloud Burst — AWS spot fleet with hard cost cap | 🔲 Planned |
 | `gd-0.5` | Security Hardening — sandbox parity, E2E encryption, audit chain | 🔲 Planned |
