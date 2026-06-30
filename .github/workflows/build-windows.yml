@@ -2,27 +2,37 @@ name: Build Windows Installer
 
 # This workflow always produces at least one downloadable artifact:
 #
-#   Path A — console not yet scaffolded (pre WP-05, current state):
+#   Path A — console not yet scaffolded (pre WP-05):
 #     Uploads BUILD-STATUS.txt explaining the milestone and expected outputs.
 #     Runs in seconds; no toolchain needed.
 #
-#   Path B — console is scaffolded (post WP-05):
+#   Path B — console is scaffolded (post WP-05, current state):
 #     Builds the real NSIS (.exe) and WiX (.msi) installers and uploads them.
 #     On version tags also creates a draft GitHub Release with both attached.
+#     If the build fails, a BUILD-DIAGNOSTICS artifact (logs + `tauri info`) is
+#     uploaded instead, so every run leaves something downloadable.
 #
 # Triggers:
 #   push to main        → artifact upload only
+#   push to claude/**   → artifact upload (lets Claude's feature branches produce
+#                         installers without opening a PR every time)
 #   tag v*              → artifact upload + draft GitHub Release (publish manually)
 #   pull_request → main → artifact upload (validates the build before merge)
 #   workflow_dispatch   → manual "Run workflow" button in the Actions UI
 #
-# NOTE: workflow_dispatch and the push/tag triggers only take effect once this
-# file lives on the default branch (main). A workflow on a feature branch alone
-# never fires for push-to-main. pull_request runs from the PR head ref, so it is
-# the way to see a run (and the placeholder artifact) before this reaches main.
+# NOTE on which workflow file runs:
+#   - For `push` (including to claude/**) and `tag` events, GitHub uses the
+#     workflow definition FROM THE PUSHED COMMIT. So adding `claude/**` here and
+#     pushing to such a branch fires the build immediately — the file does NOT
+#     need to be on `main` first.
+#   - `workflow_dispatch` is the exception: the manual "Run workflow" button only
+#     appears once this file exists on the default branch (main).
+#   - `pull_request` runs from the PR head ref, another way to see a run pre-merge.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'claude/**'
     tags:
       - 'v*'
   pull_request:
@@ -168,6 +178,26 @@ jobs:
           # it fails loudly (rather than silently mutating the lock) if they drift.
           npm ci --no-audit --no-fund
 
+      # Up-front toolchain snapshot — makes every run's logs self-describing and
+      # turns a future build break into a one-glance diagnosis (versions + target).
+      - name: Log build environment
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        shell: bash
+        run: |
+          echo "=== ref ==="
+          echo "ref_name : $GITHUB_REF_NAME"
+          echo "sha      : $GITHUB_SHA"
+          echo "=== Node / npm ==="
+          node --version
+          npm --version
+          echo "=== Rust ==="
+          rustc --version
+          cargo --version
+          rustup show
+          rustup target list --installed
+          echo "=== Tauri CLI / project info ==="
+          (cd console && npx tauri info) || true
+
       - name: Build Tauri app (Windows x64)
         if: ${{ steps.readiness.outputs.ready == 'true' }}
         id: tauri_build
@@ -207,23 +237,53 @@ jobs:
           releaseDraft: true    # always draft; publish manually after reviewing
           prerelease: true      # all gd-0.x builds are pre-releases
 
-      - name: Debug info (on build failure)
+      # On a ready-but-failed build, collect diagnostics into a file so the run
+      # still yields a downloadable artifact (logs are ephemeral; an artifact is not).
+      - name: Collect build diagnostics (on failure)
         if: ${{ steps.readiness.outputs.ready == 'true' && failure() }}
         shell: bash
         run: |
-          echo "=== console/ ==="
-          ls -la console/ || echo "(not found)"
-          echo "=== console/src-tauri/ ==="
-          ls -la console/src-tauri/ || echo "(not found)"
-          echo "=== Rust toolchain ==="
-          rustup show && rustup target list --installed
-          echo "=== Node / npm ==="
-          node --version && npm --version
-          echo "=== tauri info ==="
-          cd console && npx tauri info || true
+          mkdir -p _diag
+          {
+            echo "Gruper Console — Windows Build Diagnostics"
+            echo "=========================================="
+            echo "ref : $GITHUB_REF_NAME ($GITHUB_SHA)"
+            echo "run : $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "=== console/ ==="
+            ls -la console/ || echo "(not found)"
+            echo "=== console/src-tauri/ ==="
+            ls -la console/src-tauri/ || echo "(not found)"
+            echo "=== console/src-tauri/icons/ ==="
+            ls -la console/src-tauri/icons/ || echo "(not found)"
+            echo "=== Rust toolchain ==="
+            rustc --version || true
+            cargo --version || true
+            rustup show || true
+            rustup target list --installed || true
+            echo "=== Node / npm ==="
+            node --version || true
+            npm --version || true
+            echo "=== tauri info ==="
+            (cd console && npx tauri info) || true
+            echo "=== bundle output tree (if any) ==="
+            ls -laR console/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/ 2>/dev/null \
+              || echo "(no bundle dir — build failed before bundling)"
+          } 2>&1 | tee _diag/BUILD-DIAGNOSTICS.txt
+
+      - name: Upload build diagnostics (on failure)
+        if: ${{ steps.readiness.outputs.ready == 'true' && failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-console-${{ steps.readiness.outputs.ref_label }}-windows-BUILD-DIAGNOSTICS
+          path: _diag/BUILD-DIAGNOSTICS.txt
+          retention-days: 14
+          if-no-files-found: warn
 
       - name: Upload NSIS installer (.exe)
-        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        # Only on a successful build — a failed build produces no bundle, and the
+        # diagnostics artifact above covers the failure case.
+        if: ${{ steps.readiness.outputs.ready == 'true' && success() }}
         uses: actions/upload-artifact@v4
         with:
           name: gruper-console-${{ steps.readiness.outputs.ref_label }}-windows-x64-setup.exe
@@ -232,7 +292,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload MSI installer
-        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        if: ${{ steps.readiness.outputs.ready == 'true' && success() }}
         uses: actions/upload-artifact@v4
         with:
           name: gruper-console-${{ steps.readiness.outputs.ref_label }}-windows-x64.msi
