@@ -2,14 +2,16 @@
   ResultView — the answer is the focal point.
 
   - While the task runs, the streaming reply itself fills the result area (with a
-    subtle "generating…" pulse) — there is no separate progress panel competing
+    subtle "answering…" pulse) — there is no separate progress panel competing
     with the answer.
-  - On completion it becomes rendered markdown with prominent metric pills
-    (model · time · tokens · tok/s; tok/s is computed as a fallback when the
-    runtime didn't report it).
+  - On completion the answer renders as markdown under one quiet summary line
+    ("Answered in 12.3s · ~41 tok/s"); model name and token counts sit behind a
+    small "Details" toggle instead of a pill row that competes with the answer.
+  - Failures read as plain sentences with a "Try again" button that resubmits
+    the same question to the same agent; error codes hide behind Details.
   - Markdown via marked + DOMPurify; LaTeX/math protected from markdown mangling
     and rendered by KaTeX (clean escaped-text fallback).
-  - No raw task UUIDs or inference internals in the default view.
+  - No raw task UUIDs or inference internals anywhere in the default view.
 -->
 <script lang="ts">
   import { marked } from 'marked';
@@ -18,7 +20,10 @@
   import 'katex/dist/katex.min.css';
   import { tasksStore, type ProgressLine } from '$lib/stores/tasks.js';
   import { authStore } from '$lib/stores/auth.js';
+  import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
+  import { taskStatusColour, taskStatusLabel, RUNNING_TASK_STATUSES } from '$lib/taskDisplay.js';
+  import { roleLabel } from '$lib/roles.js';
   import AgentAvatar from '$lib/components/AgentAvatar.svelte';
   import type { Task } from '$lib/types.js';
 
@@ -26,9 +31,15 @@
     taskId,
     agentId = null,
     agentName = null,
-  }: { taskId: string | null; agentId?: string | null; agentName?: string | null } = $props();
-
-  const RUNNING = new Set(['pending', 'dispatched', 'running']);
+    agentRoleId = null,
+    onResubmitted,
+  }: {
+    taskId: string | null;
+    agentId?: string | null;
+    agentName?: string | null;
+    agentRoleId?: string | null;
+    onResubmitted?: (taskId: string) => void;
+  } = $props();
 
   let task = $state<Task | null>(null);
   let progressLines = $state<ProgressLine[]>([]);
@@ -40,8 +51,11 @@
   let resultTokens = $state<number | null>(null);
   let resultTps = $state<number | null>(null);
   let copied = $state(false);
+  let showDetails = $state(false);
+  let resubmitting = $state(false);
+  let resubmitError = $state<string | null>(null);
 
-  const isRunning = $derived(task ? RUNNING.has(task.status) : false);
+  const isRunning = $derived(task ? RUNNING_TASK_STATUSES.has(task.status) : false);
   // The reply as it streams in, one growing block.
   const streamedText = $derived(progressLines.map((l) => l.text).join(''));
 
@@ -86,6 +100,8 @@
     resultDuration = null;
     resultTokens = null;
     resultTps = null;
+    showDetails = false;
+    resubmitError = null;
   }
 
   async function fetchResult(id: string): Promise<void> {
@@ -116,6 +132,34 @@
       fetchResult(task.id);
     }
   });
+
+  /** Resubmit the same question to the same agent (for failed/timed-out tasks). */
+  async function tryAgain(): Promise<void> {
+    if (!task || resubmitting) return;
+    const { token, orchestratorUrl } = $authStore;
+    if (!token) return;
+    resubmitting = true;
+    resubmitError = null;
+    try {
+      const client = new OrchestratorClient(orchestratorUrl, token);
+      const fresh = await client.submitTask({
+        assigned_agent_id: task.assigned_agent_id,
+        data_class: task.data_class,
+        input: task.input,
+        timeout_s: task.timeout_s,
+      });
+      tasksStore.prependTask(fresh);
+      logStore.frontend('info', 'ui', 'resubmitted task after failure', {
+        task_id: fresh.id,
+        agent_id: task.assigned_agent_id,
+      });
+      onResubmitted?.(fresh.id);
+    } catch (err) {
+      resubmitError = err instanceof Error ? err.message : String(err);
+    } finally {
+      resubmitting = false;
+    }
+  }
 
   // ── Markdown + math ─────────────────────────────────────────────────────────
   type MathItem = { tex: string; display: boolean };
@@ -184,20 +228,11 @@
       // clipboard may be unavailable in some webview contexts
     }
   }
-
-  const STATUS_LABEL: Record<string, string> = {
-    pending: 'queued', dispatched: 'starting', running: 'generating',
-    complete: 'done', failed: 'failed', timed_out: 'timed out', dead_letter: 'no agent available',
-  };
-  const STATUS_COLOUR: Record<string, string> = {
-    pending: 'text-slate-400', dispatched: 'text-blue-400', running: 'text-amber-400',
-    complete: 'text-green-400', failed: 'text-red-400', timed_out: 'text-orange-400', dead_letter: 'text-red-600',
-  };
 </script>
 
 {#if !taskId}
   <div class="glass-card p-8 text-center text-slate-500 text-sm">
-    Select a task to view its answer — or start a new one.
+    Select a question to see its answer — or ask a new one.
   </div>
 {:else if !task}
   <div class="glass-card p-8 text-center text-slate-500 text-sm">Loading…</div>
@@ -205,16 +240,19 @@
   <div class="glass-card p-4 space-y-3">
     <!-- Header: the question, who's answering, and status -->
     <div class="flex items-start justify-between gap-3">
-      <div class="min-w-0" title={task.id}>
+      <div class="min-w-0">
         <p class="text-sm text-white line-clamp-3">{task.input?.prompt ?? '—'}</p>
         <div class="flex items-center gap-1.5 mt-1.5 text-xs text-slate-500">
           {#if agentId && agentName}
             <AgentAvatar id={agentId} name={agentName} size={18} />
             <span class="text-slate-400">{agentName}</span>
+            {#if roleLabel(agentRoleId)}
+              <span class="text-slate-600">{roleLabel(agentRoleId)}</span>
+            {/if}
             <span>·</span>
           {/if}
-          <span class="{STATUS_COLOUR[task.status] ?? 'text-slate-400'} {isRunning ? 'progress-pulse' : ''}">
-            {STATUS_LABEL[task.status] ?? task.status}
+          <span class="{taskStatusColour(task.status)} {isRunning ? 'progress-pulse' : ''}">
+            {taskStatusLabel(task.status)}
           </span>
         </div>
       </div>
@@ -229,23 +267,35 @@
     </div>
 
     {#if task.status === 'complete'}
-      <!-- Metric pills — tok/s is the headline speed number. -->
-      <div class="flex flex-wrap gap-1.5">
-        {#if mModel}
-          <span class="text-xs font-mono text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{mModel}</span>
-        {/if}
-        {#if mDurationMs != null}
-          <span class="text-xs text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{(mDurationMs / 1000).toFixed(1)}s</span>
-        {/if}
-        {#if mTokens != null}
-          <span class="text-xs text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{mTokens.toLocaleString()} tokens</span>
-        {/if}
-        {#if tps}
-          <span class="text-xs font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5" title={tps.approx ? 'estimated from tokens ÷ time' : 'reported by the model runtime'}>
-            {tps.approx ? '~' : ''}{tps.value} tok/s
+      <!-- One quiet summary line; the numbers live behind "Details". -->
+      {#if mDurationMs != null || tps}
+        <div class="flex items-center gap-2 text-xs text-slate-500">
+          <span>
+            Answered{#if mDurationMs != null}&nbsp;in {(mDurationMs / 1000).toFixed(1)}s{/if}{#if tps}&nbsp;· {tps.approx ? '~' : ''}{tps.value} tok/s{/if}
           </span>
+          <button
+            onclick={() => (showDetails = !showDetails)}
+            class="text-slate-600 hover:text-slate-300 transition-colors"
+          >
+            {showDetails ? 'hide details' : 'details'}
+          </button>
+        </div>
+        {#if showDetails}
+          <div class="flex flex-wrap gap-1.5">
+            {#if mModel}
+              <span class="text-xs font-mono text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{mModel}</span>
+            {/if}
+            {#if mTokens != null}
+              <span class="text-xs text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{mTokens.toLocaleString()} tokens</span>
+            {/if}
+            {#if tps}
+              <span class="text-xs text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5" title={tps.approx ? 'estimated from tokens ÷ time' : 'reported by the model runtime'}>
+                {tps.approx ? '~' : ''}{tps.value} tokens/second{tps.approx ? ' (estimated)' : ''}
+              </span>
+            {/if}
+          </div>
         {/if}
-      </div>
+      {/if}
 
       {#if fetchingResult}
         <div class="text-slate-500 text-sm">Fetching the answer…</div>
@@ -260,7 +310,7 @@
           {@html renderMarkdown(resultText)}
         </div>
       {:else}
-        <div class="text-slate-500 text-sm italic">No answer returned.</div>
+        <div class="text-slate-500 text-sm italic">No answer came back.</div>
       {/if}
 
     {:else if isRunning}
@@ -270,23 +320,52 @@
       {:else}
         <div class="flex items-center gap-2 text-sm text-amber-400 progress-pulse py-2">
           <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-          {task.status === 'running' ? 'thinking…' : 'waiting for an agent…'}
+          {task.status === 'running' ? 'thinking…' : `waiting for ${agentName ?? 'an agent'}…`}
         </div>
       {/if}
 
-    {:else if task.status === 'failed'}
-      <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-        <p class="text-xs text-red-400 font-medium">Task failed</p>
-        {#if task.error?.message}<p class="text-sm text-red-300 mt-1">{task.error.message}</p>{/if}
-        {#if task.error?.code}<p class="text-xs text-slate-500 mt-1">Code: {task.error.code}</p>{/if}
-      </div>
-    {:else if task.status === 'timed_out'}
-      <div class="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3 text-orange-400 text-sm">
-        Timed out after {task.timeout_s}s.
-      </div>
-    {:else if task.status === 'dead_letter'}
-      <div class="bg-red-900/20 border border-red-800/40 rounded-lg p-3 text-red-400 text-sm">
-        No agent could take this task (retried 3 times). Check that the agent is online.
+    {:else}
+      <!-- Failed / timed out / unreachable: a plain sentence and a way forward. -->
+      <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 space-y-2">
+        {#if task.status === 'failed'}
+          <p class="text-sm text-red-300">
+            {agentName ?? 'The agent'} couldn't finish this answer.
+          </p>
+          {#if task.error?.message}<p class="text-xs text-red-400/80">{task.error.message}</p>{/if}
+        {:else if task.status === 'timed_out'}
+          <p class="text-sm text-orange-300">
+            No answer after {task.timeout_s} seconds, so this question was stopped.
+          </p>
+        {:else}
+          <p class="text-sm text-red-300">
+            {agentName ?? 'The agent'} kept losing its connection while working on this,
+            so the question was given up on. Check that it's online (green dot in the
+            sidebar) and that Ollama is running, then try again.
+          </p>
+        {/if}
+        <div class="flex items-center gap-3">
+          <button
+            onclick={tryAgain}
+            disabled={resubmitting}
+            class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium transition-colors"
+          >
+            {resubmitting ? 'Asking again…' : 'Try again'}
+          </button>
+          {#if task.error?.code}
+            <button
+              onclick={() => (showDetails = !showDetails)}
+              class="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              {showDetails ? 'hide details' : 'details'}
+            </button>
+          {/if}
+        </div>
+        {#if showDetails && task.error?.code}
+          <p class="text-xs text-slate-500 font-mono">error code: {task.error.code}</p>
+        {/if}
+        {#if resubmitError}
+          <p class="text-xs text-red-400">Couldn't resubmit: {resubmitError}</p>
+        {/if}
       </div>
     {/if}
   </div>

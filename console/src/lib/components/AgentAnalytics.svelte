@@ -136,28 +136,36 @@
     {/if}
   </div>
 
-  <!-- Summary stats — same metrics as Gruper core's analytics dashboard -->
-  <div class="grid grid-cols-4 gap-2 text-center">
-    {#each [
-      { label: 'Tasks', value: stats.count },
-      { label: 'Avg (s)', value: stats.avg.toFixed(1) },
-      { label: 'Min (s)', value: stats.min.toFixed(1) },
-      { label: 'Max (s)', value: stats.max.toFixed(1) },
-    ] as stat}
-      <div class="bg-white/5 rounded-lg p-2">
-        <p class="text-lg font-semibold text-white">{stat.value}</p>
-        <p class="text-xs text-slate-500">{stat.label}</p>
-      </div>
-    {/each}
-  </div>
+  <!-- Summary stats — same metrics as Gruper core's analytics dashboard.
+       Hidden until there's data: a wall of zeroes reads as "broken", not
+       "nothing yet". -->
+  {#if agentTasks.length}
+    <div class="grid grid-cols-4 gap-2 text-center">
+      {#each [
+        { label: 'Answers', value: stats.count },
+        { label: 'Avg (s)', value: stats.avg.toFixed(1) },
+        { label: 'Fastest (s)', value: stats.min.toFixed(1) },
+        { label: 'Slowest (s)', value: stats.max.toFixed(1) },
+      ] as stat}
+        <div class="bg-white/5 rounded-lg p-2">
+          <p class="text-lg font-semibold text-white">{stat.value}</p>
+          <p class="text-xs text-slate-500">{stat.label}</p>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <!-- Response-time line chart -->
   <div class="flex-1 min-h-0 relative">
     {#if agentTasks.length}
       <canvas bind:this={canvasEl} class="w-full h-full"></canvas>
+    {:else if agent}
+      <div class="flex items-center justify-center h-full text-slate-500 text-sm text-center px-6">
+        {agent.name} hasn't answered anything yet — response times show up here once it has.
+      </div>
     {:else}
-      <div class="flex items-center justify-center h-full text-slate-500 text-sm">
-        No completed tasks yet for this agent.
+      <div class="flex items-center justify-center h-full text-slate-500 text-sm text-center px-6">
+        Select an agent in the sidebar to see how fast it answers.
       </div>
     {/if}
   </div>

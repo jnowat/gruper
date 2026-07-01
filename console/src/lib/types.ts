@@ -65,9 +65,20 @@ export interface ModelPreferences {
 
 export interface TaskInput {
   prompt: string;
+  /**
+   * Full system prompt for the model. The console sends the specialty persona
+   * from roles.ts here so a "Critic" actually behaves like one; without it the
+   * runtime falls back to a generic one-liner built from role_template.
+   */
+  system_prompt?: string;
   role_template?: string;
   model_preferences?: ModelPreferences;
-  context?: string | null;
+  /**
+   * Free-form provenance metadata (dict on the orchestrator side). The console
+   * tags Round Table turns with { source: 'round_table' } so the History list
+   * can tell them apart from questions the user typed themselves.
+   */
+  context?: Record<string, unknown> | null;
 }
 
 export interface TaskSubmitRequest {

@@ -3,7 +3,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..database import append_event
 from ..db import Database, Row
@@ -144,14 +144,40 @@ async def list_agents(
     return [_row_to_response(r) for r in rows]
 
 
+# The role enum published in spec/contracts/models/agent.schema.json
+# (capabilities.roles items) — the 12 Gruper core templates plus "custom".
+_ALLOWED_ROLES = {
+    "analyst", "creative", "critic", "synthesizer", "expert", "devil_advocate",
+    "philosopher", "economist", "ethicist", "scientist", "psychologist",
+    "engineer", "custom",
+}
+
+
 class AgentUpdateRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=64)
+    name: str | None = Field(None, min_length=1, max_length=64)
+    # Primary role/specialty — replaces capabilities.roles[0]. A separate
+    # top-level field (rather than a raw capabilities patch) so the API can't
+    # be used to corrupt the models/hardware sections of capabilities.
+    role: str | None = Field(None, min_length=1, max_length=64)
+
+    @field_validator("role")
+    @classmethod
+    def _role_in_contract_enum(cls, v: str | None) -> str | None:
+        if v is not None and v not in _ALLOWED_ROLES:
+            raise ValueError(f"role must be one of: {sorted(_ALLOWED_ROLES)}")
+        return v
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> "AgentUpdateRequest":
+        if self.name is None and self.role is None:
+            raise ValueError("provide at least one of: name, role")
+        return self
 
 
 @router.patch(
     "/{agent_id}",
     response_model=AgentResponse,
-    summary="Rename an agent (owner only)",
+    summary="Update an agent's name and/or role (owner only)",
 )
 async def update_agent(
     agent_id: str,
@@ -159,22 +185,44 @@ async def update_agent(
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ) -> AgentResponse:
-    """Rename an agent so a fleet isn't a wall of indistinguishable names.
+    """Update an agent's display name and/or primary role.
 
-    Owner-scoped: the UPDATE matches on both id and owner_id, so a non-owner
+    Both exist so a fleet reads like a set of distinguishable helpers: the name
+    tells agents apart, the role says what each one is good at — and both are
+    editable after creation rather than frozen at registration.
+
+    Owner-scoped: every query matches on both id and owner_id, so a non-owner
     (or a bad id) gets an indistinguishable 404 rather than confirming the
-    agent exists. Only the display name is mutable here.
+    agent exists.
     """
     if not is_valid_uuid(agent_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
     pool: Database = request.app.state.pool
+
+    existing = await pool.fetchrow(
+        f"SELECT {_SELECT_COLS} FROM agents WHERE id = $1::uuid AND owner_id = $2",
+        agent_id,
+        user_id,
+    )
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
+
+    name = body.name if body.name is not None else existing["name"]
+    capabilities = dict(existing["capabilities"])
+    if body.role is not None:
+        # Replace roles[0] only, as the contract documents — secondary roles
+        # (legal per the schema) survive the update.
+        secondary = list(capabilities.get("roles") or [])[1:]
+        capabilities["roles"] = [body.role, *secondary]
+
     row = await pool.fetchrow(
         f"""
-        UPDATE agents SET name = $1
-        WHERE id = $2::uuid AND owner_id = $3
+        UPDATE agents SET name = $1, capabilities = $2
+        WHERE id = $3::uuid AND owner_id = $4
         RETURNING {_SELECT_COLS}
         """,
-        body.name,
+        name,
+        capabilities,
         agent_id,
         user_id,
     )
@@ -185,9 +233,11 @@ async def update_agent(
         actor_id=user_id,
         action="agent.updated",
         subject_id=agent_id,
-        metadata={"name": body.name},
+        metadata={"name": name, **({"role": body.role} if body.role is not None else {})},
     )
-    logger.info("Agent %s renamed to %r (owner=%s)", agent_id, body.name, user_id)
+    logger.info(
+        "Agent %s updated (name=%r, role=%r, owner=%s)", agent_id, name, body.role, user_id
+    )
     return _row_to_response(row)
 
 
