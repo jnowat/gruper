@@ -35,20 +35,23 @@ pyinstaller orchestrator/packaging/gruper-orchestrator.spec --distpath dist --wo
 echo "== Building agent runtime (dist/gruper-agent) =="
 pyinstaller agent-runtime/packaging/gruper-agent.spec --distpath dist --workpath build --noconfirm
 
-# Stage the orchestrator as this platform's Tauri sidecar binary (WP-32).
-# `cargo build`/`cargo tauri dev` for console/src-tauri HARD-FAILS without
-# this file present for the current host triple — confirmed by testing, not
-# just documented; Tauri's build script checks for it even for a plain debug
-# build, not only when actually bundling. Any dev building the Console needs
-# to run this script (or otherwise stage this file) at least once first.
+# Stage the orchestrator AND the agent as this platform's Tauri sidecar
+# binaries (WP-32, and the "Add Local Agent" flow). `cargo build`/`cargo
+# tauri dev` for console/src-tauri HARD-FAILS without BOTH files present for
+# the current host triple — confirmed by testing, not just documented;
+# Tauri's build script checks for every externalBin entry even for a plain
+# debug build, not only when actually bundling. Any dev building the Console
+# needs to run this script (or otherwise stage these files) at least once
+# first — see README.md's "Console dev loop" section.
 if command -v rustc >/dev/null 2>&1; then
   HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
   SIDECAR_DIR="console/src-tauri/binaries"
-  SIDECAR_NAME="gruper-orchestrator-${HOST_TRIPLE}"
   mkdir -p "$SIDECAR_DIR"
-  cp "dist/gruper-orchestrator" "$SIDECAR_DIR/$SIDECAR_NAME"
-  chmod +x "$SIDECAR_DIR/$SIDECAR_NAME"
-  echo "== Staged Tauri sidecar binary: $SIDECAR_DIR/$SIDECAR_NAME =="
+  cp "dist/gruper-orchestrator" "$SIDECAR_DIR/gruper-orchestrator-${HOST_TRIPLE}"
+  chmod +x "$SIDECAR_DIR/gruper-orchestrator-${HOST_TRIPLE}"
+  cp "dist/gruper-agent" "$SIDECAR_DIR/gruper-agent-${HOST_TRIPLE}"
+  chmod +x "$SIDECAR_DIR/gruper-agent-${HOST_TRIPLE}"
+  echo "== Staged Tauri sidecar binaries: $SIDECAR_DIR/{gruper-orchestrator,gruper-agent}-${HOST_TRIPLE} =="
 else
   echo "== rustc not found — skipping Tauri sidecar staging (console build will need it) =="
 fi

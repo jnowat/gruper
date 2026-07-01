@@ -9,12 +9,27 @@ Prerequisites (set in .env or environment):
     ORCHESTRATOR_URL  — WSS endpoint of the orchestrator
     AGENT_ID          — UUID assigned by POST /v1/agents
     JWT_TOKEN         — token from POST /v1/auth/token
+
+When GRUPER_EXIT_WITH_PARENT is set (the Console's "Add Local Agent" sidecar
+spawn sets this — see console/src-tauri/src/lib.rs::spawn_local_agent), a
+background thread self-terminates the process once its ancestry changes.
+This mirrors orchestrator/packaging/entry.py's watchdog: relying on the
+Console to clean up its spawned agent on exit is not reliable on a forceful
+kill (Task Manager's "End Task"/TerminateProcess, or SIGKILL), which no
+userspace code running inside the victim process can intercept. See that
+module's docstring for why the full ancestor chain is walked rather than
+just the immediate parent (PyInstaller's --onefile bootloader process).
+Not set for a manually-run agent (`python main.py`, `.env`-configured) — it
+must keep running independently of whatever shell started it.
 """
 
 import asyncio
 import logging
+import os
 import signal
 import sys
+import threading
+import time
 
 from config import settings
 from ws_client import AgentWSClient
@@ -25,6 +40,48 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+_MAX_ANCESTOR_DEPTH = 6
+
+
+def _capture_ancestors() -> list[tuple[int, float]]:
+    """Return [(pid, create_time), ...] for this process's ancestors, closest first."""
+    import psutil
+
+    ancestors = []
+    try:
+        proc = psutil.Process()
+        for _ in range(_MAX_ANCESTOR_DEPTH):
+            parent = proc.parent()
+            if parent is None:
+                break
+            try:
+                ancestors.append((parent.pid, parent.create_time()))
+            except psutil.Error:
+                break
+            proc = parent
+    except psutil.Error:
+        pass
+    return ancestors
+
+
+def _ancestor_unchanged(pid: int, create_time: float) -> bool:
+    import psutil
+
+    try:
+        return abs(psutil.Process(pid).create_time() - create_time) < 1.0
+    except psutil.Error:
+        return False
+
+
+def _exit_if_orphaned(poll_interval_s: float = 2.0) -> None:
+    watched = _capture_ancestors()
+    if not watched:
+        return  # nothing meaningful to watch; don't loop forever on bad data
+    while True:
+        time.sleep(poll_interval_s)
+        if not all(_ancestor_unchanged(pid, ct) for pid, ct in watched):
+            os._exit(0)
 
 
 async def _run() -> None:
@@ -47,7 +104,24 @@ async def _run() -> None:
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.ensure_future(client.stop()))
+        try:
+            loop.add_signal_handler(sig, lambda: asyncio.ensure_future(client.stop()))
+        except NotImplementedError:
+            # loop.add_signal_handler is Unix-only — Windows' ProactorEventLoop
+            # (required there for subprocess support) raises this unconditionally.
+            # Without this guard the agent crashes on startup on every Windows
+            # machine, which would have silently broken the desktop "Add Local
+            # Agent" flow this runs under. Ctrl+C still works via the default
+            # KeyboardInterrupt handling; GRUPER_EXIT_WITH_PARENT below covers
+            # the Console-spawned shutdown path that matters for that flow.
+            logger.warning(
+                "Signal handlers are not supported on this platform's event loop "
+                "(expected on Windows) — relying on default interrupt handling."
+            )
+            break
+
+    if os.environ.get("GRUPER_EXIT_WITH_PARENT"):
+        threading.Thread(target=_exit_if_orphaned, daemon=True).start()
 
     logger.info(
         "Gruper Agent Runtime %s starting (agent_id=%s)",

@@ -25,6 +25,13 @@ export interface AgentCapabilities {
   };
 }
 
+export interface AgentRegistrationRequest {
+  name: string;
+  pubkey: string;
+  capabilities: AgentCapabilities;
+  runtime_version: string;
+}
+
 export interface Agent {
   id: string;
   name: string;

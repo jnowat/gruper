@@ -10,6 +10,10 @@ build/
 src-tauri/target/
 src-tauri/gen/
 
+# Staged sidecar binaries (scripts/build-desktop.sh/.ps1) — build artifacts,
+# not source; platform-specific and must not be committed.
+src-tauri/binaries/
+
 # Logs & local env
 *.log
 .env

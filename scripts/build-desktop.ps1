@@ -39,20 +39,21 @@ pyinstaller orchestrator/packaging/gruper-orchestrator.spec --distpath dist --wo
 Write-Host "== Building agent runtime (dist\gruper-agent.exe) =="
 pyinstaller agent-runtime/packaging/gruper-agent.spec --distpath dist --workpath build --noconfirm
 
-# Stage the orchestrator as this platform's Tauri sidecar binary (WP-32).
-# `cargo build`/`cargo tauri dev` for console/src-tauri HARD-FAILS without
-# this file present for the current host triple — confirmed by testing (on
-# Linux; not yet re-confirmed on Windows) — Tauri's build script checks for
-# it even for a plain debug build, not only when actually bundling. Any dev
-# building the Console needs to run this script (or otherwise stage this
-# file) at least once first.
+# Stage the orchestrator AND the agent as this platform's Tauri sidecar
+# binaries (WP-32, and the "Add Local Agent" flow). `cargo build`/`cargo
+# tauri dev` for console/src-tauri HARD-FAILS without BOTH files present for
+# the current host triple — confirmed by testing (on Linux; not yet
+# re-confirmed on Windows) — Tauri's build script checks for every
+# externalBin entry even for a plain debug build, not only when actually
+# bundling. Any dev building the Console needs to run this script (or
+# otherwise stage these files) at least once first.
 if (Get-Command rustc -ErrorAction SilentlyContinue) {
     $HostTriple = (rustc -vV | Select-String '^host: (.+)$').Matches[0].Groups[1].Value
     $SidecarDir = "console/src-tauri/binaries"
-    $SidecarName = "gruper-orchestrator-$HostTriple.exe"
     New-Item -ItemType Directory -Force -Path $SidecarDir | Out-Null
-    Copy-Item "dist/gruper-orchestrator.exe" "$SidecarDir/$SidecarName" -Force
-    Write-Host "== Staged Tauri sidecar binary: $SidecarDir/$SidecarName =="
+    Copy-Item "dist/gruper-orchestrator.exe" "$SidecarDir/gruper-orchestrator-$HostTriple.exe" -Force
+    Copy-Item "dist/gruper-agent.exe" "$SidecarDir/gruper-agent-$HostTriple.exe" -Force
+    Write-Host "== Staged Tauri sidecar binaries: $SidecarDir/{gruper-orchestrator,gruper-agent}-$HostTriple.exe =="
 } else {
     Write-Host "== rustc not found — skipping Tauri sidecar staging (console build will need it) =="
 }

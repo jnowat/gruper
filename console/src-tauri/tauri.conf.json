@@ -33,6 +33,6 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/gruper-orchestrator"]
+    "externalBin": ["binaries/gruper-orchestrator", "binaries/gruper-agent"]
   }
 }

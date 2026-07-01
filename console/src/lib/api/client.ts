@@ -1,4 +1,4 @@
-import type { Agent, Task, TaskSubmitRequest } from '$lib/types.js';
+import type { Agent, AgentRegistrationRequest, Task, TaskSubmitRequest } from '$lib/types.js';
 
 /**
  * Thin REST client for the Gruper Orchestrator API.
@@ -34,6 +34,13 @@ export class OrchestratorClient {
 
   listAgents(): Promise<Agent[]> {
     return this._fetch<Agent[]>('/v1/agents');
+  }
+
+  registerAgent(body: AgentRegistrationRequest): Promise<Agent> {
+    return this._fetch<Agent>('/v1/agents', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
   }
 
   listTasks(): Promise<Task[]> {

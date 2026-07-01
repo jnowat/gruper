@@ -19,11 +19,15 @@ backends expose identical API/wire behavior and run the same test suite
 
 ## Quick Start — Desktop (default, no Docker, no PostgreSQL)
 
+Run these from the **repo root**, not from inside `orchestrator/` — the app
+is a package (`orchestrator.main:app`), so pointing uvicorn at `main:app`
+from inside this directory fails with `ImportError: attempted relative
+import with no known parent package` (verified; this is not hypothetical).
+
 ```bash
-cd orchestrator
 python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8080
+pip install -r orchestrator/requirements.txt
+uvicorn orchestrator.main:app --host 0.0.0.0 --port 8080
 ```
 
 With no `DATABASE_URL` set, the orchestrator creates a local SQLite file
