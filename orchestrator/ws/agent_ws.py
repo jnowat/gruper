@@ -1,11 +1,14 @@
 import json
 import logging
+from typing import Callable
 
-import asyncpg
+import anyio
 from fastapi import WebSocket, WebSocketDisconnect
 
 from ..connection_manager import manager
 from ..database import append_event, get_pool
+from ..db import Database
+from ..db.util import is_valid_uuid, now_iso
 from ..dispatcher import dispatch_pending_for_agent, requeue_or_deadletter
 from ..security import verify_token
 
@@ -34,7 +37,7 @@ _STATUS_EVENT = {
 
 
 async def _broadcast_fleet_event(
-    pool: asyncpg.Pool, agent_id: str, owner_id: str, event: str, status: str
+    pool: Database, agent_id: str, owner_id: str, event: str, status: str
 ) -> None:
     """Push a fleet_event to every console owned by the agent's owner.
 
@@ -114,7 +117,10 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
             msg_type = msg.get("type")
 
             if msg_type == _MSG_REGISTER:
-                agent_id = await _handle_register(websocket, pool, user_id, msg)
+                def _set_agent_id(value: str) -> None:
+                    nonlocal agent_id
+                    agent_id = value
+                await _handle_register(websocket, pool, user_id, msg, _set_agent_id)
 
             elif msg_type == _MSG_HEARTBEAT:
                 if agent_id is None:
@@ -155,47 +161,65 @@ async def handle_agent_ws(websocket: WebSocket, token: str) -> None:
         logger.exception("Unexpected error on agent WS (agent_id=%s)", agent_id)
     finally:
         if agent_id:
-            try:
-                await requeue_or_deadletter(pool, agent_id)
-            except Exception:
-                logger.warning("Could not requeue tasks for agent %s", agent_id)
-            manager.disconnect(agent_id)
-            await _set_status(pool, agent_id, "offline")
-            try:
-                await append_event(pool, actor_id=user_id, action="agent.disconnected", subject_id=agent_id)
-            except Exception:
-                logger.warning("Could not append disconnect event for agent %s", agent_id)
-            await _broadcast_fleet_event(pool, agent_id, user_id, "agent_offline", "offline")
-            logger.info("Agent %s offline (owner=%s)", agent_id, user_id)
+            # Disconnect cleanup must complete even if this task's own scope
+            # is being cancelled (e.g. server shutdown, or — confirmed by
+            # direct testing — Starlette's TestClient WebSocket session,
+            # whose __exit__ cancels an anyio CancelScope around the same
+            # time it delivers the disconnect message). anyio enforces
+            # cancellation at EVERY checkpoint within a cancelled scope, so
+            # plain asyncio.shield() is not sufficient here — it creates a
+            # new asyncio Task but does not escape anyio's own scope-based
+            # cancellation tracking. anyio.CancelScope(shield=True) is the
+            # construct anyio provides specifically for this: cleanup code
+            # that must run to completion regardless of the enclosing
+            # scope's cancellation state.
+            with anyio.CancelScope(shield=True):
+                await _cleanup_on_disconnect(pool, agent_id, user_id)
+
+
+async def _cleanup_on_disconnect(pool: Database, agent_id: str, user_id: str) -> None:
+    try:
+        await requeue_or_deadletter(pool, agent_id)
+    except Exception:
+        logger.warning("Could not requeue tasks for agent %s", agent_id)
+    manager.disconnect(agent_id)
+    await _set_status(pool, agent_id, "offline")
+    try:
+        await append_event(pool, actor_id=user_id, action="agent.disconnected", subject_id=agent_id)
+    except Exception:
+        logger.warning("Could not append disconnect event for agent %s", agent_id)
+    await _broadcast_fleet_event(pool, agent_id, user_id, "agent_offline", "offline")
+    logger.info("Agent %s offline (owner=%s)", agent_id, user_id)
 
 
 async def _handle_register(
     websocket: WebSocket,
-    pool: asyncpg.Pool,
+    pool: Database,
     user_id: str,
     msg: dict,
-) -> str | None:
+    set_agent_id: Callable[[str], None],
+) -> None:
     agent_id = msg.get("agent_id", "")
     if not agent_id:
         await websocket.send_json({"type": "error", "detail": "agent_id is required"})
-        return None
+        return
 
-    try:
-        row = await pool.fetchrow(
-            "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid",
-            agent_id,
-        )
-    except asyncpg.InvalidTextRepresentationError:
+    if not is_valid_uuid(agent_id):
         await websocket.send_json({"type": "error", "detail": "agent_id must be a valid UUID"})
-        return None
+        return
+
+    row = await pool.fetchrow(
+        "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid",
+        agent_id,
+    )
 
     if row is None:
         await websocket.send_json({"type": "error", "detail": "agent not found"})
-        return None
+        return
 
     if row["owner_id"] != user_id:
         await websocket.send_json({"type": "error", "detail": "forbidden"})
-        return None
+        return
 
     if manager.is_connected(agent_id):
         # Agent is reconnecting after a crash or network blip; replace the stale entry.
@@ -205,6 +229,18 @@ async def _handle_register(
     manager.connect(agent_id, websocket)
     await _set_status(pool, agent_id, "idle")
     await append_event(pool, actor_id=user_id, action="agent.connected", subject_id=agent_id)
+
+    # The agent is logically connected as of here: tracked in
+    # ConnectionManager and marked idle in the DB. Tell the caller now,
+    # before doing the best-effort follow-up below (ack, console notify,
+    # queue drain). If the connection drops or this coroutine is cancelled
+    # partway through that follow-up, the caller's disconnect handler still
+    # needs to know this agent_id to mark it offline and requeue its tasks
+    # — otherwise a client that disconnects immediately after registering
+    # leaves a phantom "idle" agent that's never cleaned up. (Confirmed via
+    # a clean pre-WP-30 checkout that this race pre-dates this work packet;
+    # not something introduced here.)
+    set_agent_id(agent_id)
 
     await websocket.send_json({"type": "registered", "agent_id": agent_id})
     logger.info("Agent %s online (owner=%s)", agent_id, user_id)
@@ -216,19 +252,17 @@ async def _handle_register(
     # Drain any tasks that arrived while this agent was offline.
     await dispatch_pending_for_agent(pool, manager, agent_id)
 
-    return agent_id
 
-
-async def _handle_heartbeat(pool: asyncpg.Pool, agent_id: str) -> None:
+async def _handle_heartbeat(pool: Database, agent_id: str) -> None:
     manager.record_heartbeat(agent_id)
     await pool.execute(
-        "UPDATE agents SET last_seen = NOW() WHERE id = $1::uuid", agent_id
+        "UPDATE agents SET last_seen = $2 WHERE id = $1::uuid", agent_id, now_iso()
     )
 
 
 async def _handle_status_update(
     websocket: WebSocket,
-    pool: asyncpg.Pool,
+    pool: Database,
     agent_id: str,
     user_id: str,
     msg: dict,
@@ -255,14 +289,14 @@ async def _handle_status_update(
 
 
 async def _handle_task_ack(
-    pool: asyncpg.Pool,
+    pool: Database,
     agent_id: str,
     msg: dict,
 ) -> None:
     """Mark a dispatched task as running once the agent acknowledges receipt."""
     task_id = msg.get("task_id", "")
-    if not task_id:
-        logger.warning("task_ack from agent %s missing task_id", agent_id)
+    if not task_id or not is_valid_uuid(task_id):
+        logger.warning("task_ack from agent %s missing/invalid task_id", agent_id)
         return
     updated = await pool.fetchval(
         """
@@ -281,7 +315,7 @@ async def _handle_task_ack(
         logger.warning("task_ack ignored for task %s (not dispatched to agent %s)", task_id, agent_id)
 
 
-async def _handle_progress(pool: asyncpg.Pool, agent_id: str, msg: dict) -> None:
+async def _handle_progress(pool: Database, agent_id: str, msg: dict) -> None:
     """Forward a progress frame from the agent to the task submitter's console."""
     task_id = msg.get("task_id", "?")
     partial = msg.get("partial_output") or msg.get("text") or None
@@ -290,6 +324,9 @@ async def _handle_progress(pool: asyncpg.Pool, agent_id: str, msg: dict) -> None
     tokens = msg.get("tokens_so_far")
 
     logger.info("Progress task=%s agent=%s: %s", task_id, agent_id, (partial or step or "")[:200])
+
+    if not is_valid_uuid(task_id):
+        return
 
     row = await pool.fetchrow(
         "SELECT submitter_id::text FROM tasks WHERE id = $1::uuid", task_id
@@ -309,7 +346,7 @@ async def _handle_progress(pool: asyncpg.Pool, agent_id: str, msg: dict) -> None
 
 
 async def _handle_result(
-    pool: asyncpg.Pool,
+    pool: Database,
     agent_id: str,
     user_id: str,
     msg: dict,
@@ -317,7 +354,7 @@ async def _handle_result(
     """Record a task result (complete or failed) received from the agent."""
     task_id = msg.get("task_id", "")
     terminal_status = msg.get("status")
-    if not task_id or terminal_status not in ("complete", "failed"):
+    if not task_id or terminal_status not in ("complete", "failed") or not is_valid_uuid(task_id):
         logger.warning(
             "Invalid result frame from agent %s: task_id=%r status=%r",
             agent_id, task_id, terminal_status,
@@ -331,7 +368,7 @@ async def _handle_result(
         """
         UPDATE tasks
         SET status       = $3,
-            completed_at = NOW(),
+            completed_at = $6,
             result       = $4::jsonb,
             error        = $5::jsonb
         WHERE id                = $1::uuid
@@ -344,6 +381,7 @@ async def _handle_result(
         terminal_status,
         result_payload,
         error_payload,
+        now_iso(),
     )
     if updated:
         action = "task.completed" if terminal_status == "complete" else "task.failed"
@@ -388,9 +426,10 @@ async def _handle_result(
         )
 
 
-async def _set_status(pool: asyncpg.Pool, agent_id: str, status: str) -> None:
+async def _set_status(pool: Database, agent_id: str, status: str) -> None:
     await pool.execute(
-        "UPDATE agents SET status = $1, last_seen = NOW() WHERE id = $2::uuid",
+        "UPDATE agents SET status = $1, last_seen = $3 WHERE id = $2::uuid",
         status,
         agent_id,
+        now_iso(),
     )

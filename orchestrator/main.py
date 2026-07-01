@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .connection_manager import manager
 from .database import close_db, get_pool, init_db, run_migrations
+from .db.util import now_iso
 from .routers import agents, auth, health, tasks
 from .ws.agent_ws import handle_agent_ws
 from .ws.console_ws import handle_console_ws
@@ -16,20 +17,34 @@ from .ws.console_ws import handle_console_ws
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
 
+# PostgreSQL's INTERVAL arithmetic has no SQLite equivalent (dispatched_at
+# and "now" are both ISO-8601 text on SQLite) — this is one of the few
+# queries that genuinely needs dialect-specific SQL text rather than the
+# generic placeholder/cast adapter. Both sides of the SQLite comparison are
+# normalized through datetime() so the TEXT comparison isn't thrown off by
+# datetime()'s space-separated output vs. Python's "T"-separated isoformat()
+# (verified empirically — see WP-30 notes; a naive string comparison of the
+# two different formats silently produces wrong results).
+_TIMEOUT_WATCHDOG_SQL_PG = """
+    UPDATE tasks SET status = 'timed_out', completed_at = $1
+    WHERE status IN ('dispatched', 'running')
+      AND dispatched_at + (timeout_s * INTERVAL '1 second') < $1
+    RETURNING id::text, assigned_agent_id::text
+"""
+_TIMEOUT_WATCHDOG_SQL_SQLITE = """
+    UPDATE tasks SET status = 'timed_out', completed_at = ?1
+    WHERE status IN ('dispatched', 'running')
+      AND datetime(dispatched_at, '+' || timeout_s || ' seconds') < datetime(?1)
+    RETURNING id, assigned_agent_id
+"""
+
 
 async def _timeout_watchdog() -> None:
     """Background task: mark dispatched/running tasks timed_out when their deadline expires."""
     while True:
         await asyncio.sleep(30)
-        pool = get_pool()
-        rows = await pool.fetch(
-            """
-            UPDATE tasks SET status = 'timed_out', completed_at = NOW()
-            WHERE status IN ('dispatched', 'running')
-              AND dispatched_at + (timeout_s * INTERVAL '1 second') < NOW()
-            RETURNING id::text, assigned_agent_id::text
-            """
-        )
+        db = get_pool()
+        rows = await db.fetch(db.q(pg=_TIMEOUT_WATCHDOG_SQL_PG, lite=_TIMEOUT_WATCHDOG_SQL_SQLITE), now_iso())
         for row in rows:
             logger.warning("Task %s timed out (agent=%s)", row["id"], row["assigned_agent_id"])
 

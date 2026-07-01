@@ -14,12 +14,13 @@ task stays 'pending' and is dispatched on the agent's next WebSocket connect.
 import logging
 from typing import Any
 
-import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from ..connection_manager import manager
 from ..database import append_event
+from ..db import Database, Row
+from ..db.util import is_valid_uuid, new_id, now_iso, ts_or_none
 from ..dispatcher import try_dispatch
 from ..security import get_current_user_id
 
@@ -120,19 +121,21 @@ async def submit_task(
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ) -> TaskResponse:
-    pool: asyncpg.Pool = request.app.state.pool
+    pool: Database = request.app.state.pool
 
-    # Validate agent exists and belongs to the caller.
-    try:
-        agent = await pool.fetchrow(
-            "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid",
-            body.assigned_agent_id,
-        )
-    except asyncpg.InvalidTextRepresentationError:
+    # Validate agent exists and belongs to the caller. UUID format is checked
+    # in Python (not left to a `::uuid` cast failure) so both backends behave
+    # identically — SQLite stores UUIDs as plain TEXT and would otherwise just
+    # find no matching row (404) instead of rejecting a malformed one (422).
+    if not is_valid_uuid(body.assigned_agent_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="assigned_agent_id must be a valid UUID",
         )
+    agent = await pool.fetchrow(
+        "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid",
+        body.assigned_agent_id,
+    )
     if agent is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
     if agent["owner_id"] != user_id:
@@ -143,20 +146,19 @@ async def submit_task(
 
     # Idempotency: return existing task if correlation_id already used.
     if body.correlation_id:
-        try:
-            existing_id = await pool.fetchval(
-                """
-                SELECT id::text FROM tasks
-                WHERE submitter_id = $1::uuid AND correlation_id = $2::uuid
-                """,
-                user_id,
-                body.correlation_id,
-            )
-        except asyncpg.InvalidTextRepresentationError:
+        if not is_valid_uuid(body.correlation_id):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="correlation_id must be a valid UUID",
             )
+        existing_id = await pool.fetchval(
+            """
+            SELECT id::text FROM tasks
+            WHERE submitter_id = $1::uuid AND correlation_id = $2::uuid
+            """,
+            user_id,
+            body.correlation_id,
+        )
         if existing_id:
             existing = await pool.fetchrow(
                 f"SELECT {_TASK_SELECT} FROM tasks WHERE id = $1::uuid",
@@ -174,23 +176,26 @@ async def submit_task(
         "context":           body.input.context,
     }
 
+    task_id = new_id()
     row = await pool.fetchrow(
         f"""
         INSERT INTO tasks
-            (submitter_id, assigned_agent_id, data_class, input, allowed_tools,
-             priority, deadline, timeout_s, correlation_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9::uuid)
+            (id, submitter_id, assigned_agent_id, data_class, input, allowed_tools,
+             priority, deadline, timeout_s, correlation_id, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10::uuid, $11)
         RETURNING {_TASK_SELECT}
         """,
+        task_id,
         user_id,
         body.assigned_agent_id,
         body.data_class,
         task_input,
         body.allowed_tools,
         body.priority,
-        body.deadline,        # PostgreSQL parses ISO 8601 strings as TIMESTAMPTZ
+        body.deadline,        # PostgreSQL parses ISO 8601 strings as TIMESTAMPTZ; SQLite stores as-is
         body.timeout_s,
         body.correlation_id,  # NULL when not provided
+        now_iso(),
     )
 
     await append_event(
@@ -220,7 +225,7 @@ async def list_tasks(
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ) -> list[TaskResponse]:
-    pool: asyncpg.Pool = request.app.state.pool
+    pool: Database = request.app.state.pool
     rows = await pool.fetch(
         f"""
         SELECT {_TASK_SELECT} FROM tasks
@@ -242,17 +247,16 @@ async def get_task(
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ) -> TaskResponse:
-    pool: asyncpg.Pool = request.app.state.pool
-    try:
-        row = await pool.fetchrow(
-            f"SELECT {_TASK_SELECT} FROM tasks WHERE id = $1::uuid",
-            task_id,
-        )
-    except asyncpg.InvalidTextRepresentationError:
+    pool: Database = request.app.state.pool
+    if not is_valid_uuid(task_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="task_id must be a valid UUID",
         )
+    row = await pool.fetchrow(
+        f"SELECT {_TASK_SELECT} FROM tasks WHERE id = $1::uuid",
+        task_id,
+    )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     if row["submitter_id"] != user_id:
@@ -262,10 +266,7 @@ async def get_task(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _row_to_response(row: asyncpg.Record) -> TaskResponse:
-    def ts(val) -> str | None:
-        return val.isoformat() if val is not None else None
-
+def _row_to_response(row: Row) -> TaskResponse:
     return TaskResponse(
         id=row["id"],
         submitter_id=row["submitter_id"],
@@ -276,12 +277,12 @@ def _row_to_response(row: asyncpg.Record) -> TaskResponse:
         allowed_tools=list(row["allowed_tools"]) if row["allowed_tools"] else [],
         status=row["status"],
         priority=row["priority"],
-        deadline=ts(row["deadline"]),
+        deadline=ts_or_none(row["deadline"]),
         timeout_s=row["timeout_s"],
         retry_count=row["retry_count"],
-        created_at=ts(row["created_at"]),
-        dispatched_at=ts(row["dispatched_at"]),
-        completed_at=ts(row["completed_at"]),
+        created_at=ts_or_none(row["created_at"]),
+        dispatched_at=ts_or_none(row["dispatched_at"]),
+        completed_at=ts_or_none(row["completed_at"]),
         result=dict(row["result"]) if row["result"] else None,
         error=dict(row["error"]) if row["error"] else None,
     )

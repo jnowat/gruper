@@ -96,7 +96,12 @@ class TestAgentRegistration:
         )
         assert resp.status_code == 422
 
-    def test_register_without_token_returns_403(self, client: TestClient) -> None:
+    def test_register_without_token_returns_401(self, client: TestClient) -> None:
+        # FastAPI's HTTPBearer (auto_error=True) returns 401 for a missing
+        # Authorization header on currently-installed fastapi/starlette
+        # versions (this test asserted 403 pre-WP-30; confirmed via a clean
+        # checkout that the mismatch is a library-version behavior change,
+        # not something this work packet introduced — see WP-30 notes).
         resp = client.post(
             "/v1/agents",
             json={
@@ -106,7 +111,7 @@ class TestAgentRegistration:
                 "runtime_version": "gd-0.1.0",
             },
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     def test_list_agents_returns_list(
         self, client: TestClient, auth_token: tuple[str, str]

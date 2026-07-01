@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from ..database import append_event
+from ..db.util import new_id, now_iso
 from ..security import issue_token
 
 logger = logging.getLogger(__name__)
@@ -42,12 +43,14 @@ async def get_token(body: TokenRequest, request: Request) -> TokenResponse:
         user_id = row["id"]
         action = "user.token_issued"
     else:
-        row = await pool.fetchrow(
-            "INSERT INTO users (pubkey, display_name) VALUES ($1, $2) RETURNING id::text",
+        user_id = new_id()
+        await pool.execute(
+            "INSERT INTO users (id, pubkey, display_name, created_at) VALUES ($1, $2, $3, $4)",
+            user_id,
             body.pubkey,
             body.display_name,
+            now_iso(),
         )
-        user_id = row["id"]
         action = "user.created"
         logger.info("New user created: %s", user_id)
 

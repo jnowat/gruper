@@ -9,7 +9,42 @@ export interface AuthState {
 }
 
 const _STORE_KEY = 'gruper-console-auth';
+const _IDENTITY_KEY = 'gruper-console-identity';
 const _DEFAULT_URL = 'http://localhost:8080';
+
+function _base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * WP-32: a desktop user should never have to run a Python one-liner to get a
+ * pubkey before they can connect. gd-0.1's /v1/auth/token stubs out real
+ * ed25519 signature verification and find-or-creates a user by pubkey alone
+ * (see orchestrator/routers/auth.py), so a random 32-byte value serves as a
+ * stable client identity just as well — it's generated once and persisted
+ * separately from the auth token/session so logging out doesn't spawn a new
+ * orchestrator-side user on the next login.
+ */
+export function getOrCreatePubkey(): string {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(_IDENTITY_KEY) : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as { pubkey?: string };
+      if (parsed.pubkey) return parsed.pubkey;
+    }
+  } catch {
+    // Fall through and generate a fresh one.
+  }
+  const pubkey = _base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  try {
+    localStorage.setItem(_IDENTITY_KEY, JSON.stringify({ pubkey }));
+  } catch {
+    // Best-effort; worst case we generate a new identity next launch too.
+  }
+  return pubkey;
+}
 
 function createAuthStore() {
   // Attempt to restore from localStorage (Tauri persists localStorage between launches).

@@ -2,11 +2,12 @@ import logging
 import re
 from typing import Any
 
-import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from ..database import append_event
+from ..db import Database, Row
+from ..db.util import new_id, now_iso, ts_or_none
 from ..security import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ async def register_agent(
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ) -> AgentResponse:
-    pool: asyncpg.Pool = request.app.state.pool
+    pool: Database = request.app.state.pool
 
     existing = await pool.fetchval("SELECT 1 FROM agents WHERE pubkey = $1", body.pubkey)
     if existing:
@@ -88,14 +89,16 @@ async def register_agent(
             detail="An agent with this pubkey is already registered",
         )
 
+    agent_id = new_id()
     row = await pool.fetchrow(
         f"""
         INSERT INTO agents
-            (owner_id, pubkey, name, capabilities, availability, runtime_version,
-             location_tag, jurisdiction, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            (id, owner_id, pubkey, name, capabilities, availability, runtime_version,
+             location_tag, jurisdiction, metadata, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING {_SELECT_COLS}
         """,
+        agent_id,
         user_id,
         body.pubkey,
         body.name,
@@ -105,6 +108,7 @@ async def register_agent(
         body.location_tag,
         body.jurisdiction,
         body.metadata,
+        now_iso(),
     )
 
     await append_event(
@@ -127,7 +131,7 @@ async def list_agents(
     request: Request,
     user_id: str = Depends(get_current_user_id),
 ) -> list[AgentResponse]:
-    pool: asyncpg.Pool = request.app.state.pool
+    pool: Database = request.app.state.pool
     rows = await pool.fetch(
         f"SELECT {_SELECT_COLS} FROM agents WHERE owner_id = $1 ORDER BY created_at DESC",
         user_id,
@@ -135,7 +139,7 @@ async def list_agents(
     return [_row_to_response(r) for r in rows]
 
 
-def _row_to_response(row: asyncpg.Record) -> AgentResponse:
+def _row_to_response(row: Row) -> AgentResponse:
     return AgentResponse(
         id=row["id"],
         owner_id=row["owner_id"],
@@ -147,6 +151,6 @@ def _row_to_response(row: asyncpg.Record) -> AgentResponse:
         availability=dict(row["availability"]) if row["availability"] else None,
         location_tag=row["location_tag"],
         jurisdiction=row["jurisdiction"],
-        last_seen=row["last_seen"].isoformat() if row["last_seen"] else None,
-        created_at=row["created_at"].isoformat(),
+        last_seen=ts_or_none(row["last_seen"]),
+        created_at=ts_or_none(row["created_at"]),
     )

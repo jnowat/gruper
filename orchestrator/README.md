@@ -1,26 +1,62 @@
 # Gruper Orchestrator
 
-**Milestone:** `gd-0.2` (WP-04 + WP-05) · **Status:** Task dispatch + console relay — submit, dispatch, lifecycle, retry, live fleet/task push to the Manager Console
+**Milestone:** `gd-0.2.x` (WP-30) · **Status:** Task dispatch + console relay + **SQLite desktop default** — submit, dispatch, lifecycle, retry, live fleet/task push to the Manager Console
 
 The orchestrator is the relay hub for Gruper Distributed. Agent nodes dial
 *outbound* WebSocket connections to it; the Manager Console manages it over REST.
 No inbound connections are made to any agent node — NAT traversal is free by design.
 
 WP-02 established the database schema, auth layer, and WebSocket heartbeat foundation.
-WP-04 (this packet) adds task submission, SKIP-LOCKED dispatch, lifecycle management,
-timeout watchdog, and retry/dead-letter logic. Console WS relay (WP-05) and
-cross-owner sharing (WP-08) extend this foundation without replacing it.
+WP-04 added task submission, dispatch, lifecycle management, timeout watchdog, and
+retry/dead-letter logic. Console WS relay (WP-05) extends this foundation. **WP-30**
+introduced a database backend abstraction (`db/`): **SQLite is the default** for
+local/desktop use — no server to install or run — and **PostgreSQL is an opt-in,
+advanced/server-tier option** for multi-user or production deployments. Both
+backends expose identical API/wire behavior and run the same test suite
+(`.github/workflows/orchestrator-tests.yml`).
 
 ---
 
-## Quick Start
+## Quick Start — Desktop (default, no Docker, no PostgreSQL)
+
+```bash
+cd orchestrator
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --host 0.0.0.0 --port 8080
+```
+
+With no `DATABASE_URL` set, the orchestrator creates a local SQLite file
+(`orchestrator.db`, next to where you run it) on first start and runs the
+schema migrations against it automatically. A random `JWT_SECRET` should be
+set for anything beyond quick local testing — see [Configuration](#configuration).
+
+Verify it's up:
+
+```bash
+curl http://localhost:8080/v1/health
+# {"status":"ok","version":"gd-0.1.0","db":"ok"}
+```
+
+This is the whole desktop setup — no database server, no container runtime.
+(One-command packaging that removes even the venv/pip steps is tracked as
+WP-31; today this is the "one command after cloning the repo" experience.)
+
+---
+
+## Advanced: PostgreSQL / Server Tier (Docker Compose)
+
+Use this path for multi-user or production deployments where PostgreSQL's
+concurrency (`SKIP LOCKED`), `JSONB` query power, and operational tooling
+matter. It is **not** required for normal desktop use.
 
 ```bash
 cd orchestrator
 cp .env.example .env
 ```
 
-Edit `.env` — at minimum, set `POSTGRES_PASSWORD` and `JWT_SECRET`:
+Edit `.env` — at minimum, set `POSTGRES_PASSWORD`, `JWT_SECRET`, and point
+`DATABASE_URL` at the Postgres DSN:
 
 ```bash
 # Generate a secure signing key
@@ -35,13 +71,6 @@ docker compose up
 
 The orchestrator starts on **`http://localhost:8080`**. PostgreSQL is exposed on
 `5432` for local development only — remove that port binding before deploying.
-
-Verify it's up:
-
-```bash
-curl http://localhost:8080/v1/health
-# {"status":"ok","version":"gd-0.1.0","db":"ok"}
-```
 
 ---
 
@@ -181,11 +210,11 @@ All settings are read from environment variables or `.env`. No secrets appear in
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
-| `DATABASE_URL` | `postgresql://gruper:gruper@localhost:5432/gruper` | **Yes** | asyncpg connection DSN |
+| `DATABASE_URL` | `sqlite:///orchestrator.db` | No | **Desktop default: a local SQLite file, no server needed.** Set to a `postgresql://` DSN to opt into the server tier (see `db/connect.py`) |
 | `JWT_SECRET` | _(insecure default)_ | **Yes** | HS256 signing key; generate with `openssl rand -hex 32` |
-| `POSTGRES_PASSWORD` | _(none)_ | **Yes** (compose) | Password for the `postgres` compose service |
-| `POSTGRES_DB` | `gruper` | No | Database name |
-| `POSTGRES_USER` | `gruper` | No | Database user |
+| `POSTGRES_PASSWORD` | _(none)_ | **Yes** (compose, server tier only) | Password for the `postgres` compose service |
+| `POSTGRES_DB` | `gruper` | No | Database name (server tier only) |
+| `POSTGRES_USER` | `gruper` | No | Database user (server tier only) |
 | `JWT_EXPIRE_MINUTES` | `60` | No | Token lifetime |
 | `HEARTBEAT_TIMEOUT_S` | `90` | No | Seconds of silence before an agent goes offline |
 | `HEARTBEAT_CHECK_INTERVAL_S` | `15` | No | Watchdog polling interval |
@@ -199,11 +228,22 @@ All settings are read from environment variables or `.env`. No secrets appear in
 
 ## Running Tests
 
-Tests require a live PostgreSQL instance (separate from your dev database).
-The session fixture drops and re-migrates all tables on startup.
+The test suite runs identically against **either** backend; CI runs both as
+separate jobs (`.github/workflows/orchestrator-tests.yml`).
+
+**SQLite (default — no setup required):**
 
 ```bash
 # From the repo root or from inside orchestrator/ — pytest.ini adds .. to sys.path
+pytest orchestrator/tests/ -v
+```
+
+Each test session gets a fresh temporary SQLite file (auto-cleaned afterward)
+— no external service, no Docker.
+
+**PostgreSQL (server tier — opt-in via `TEST_DATABASE_URL`):**
+
+```bash
 TEST_DATABASE_URL=postgresql://gruper:<password>@localhost:5432/gruper_test \
   pytest orchestrator/tests/ -v
 ```
@@ -220,6 +260,9 @@ TEST_DATABASE_URL=postgresql://gruper:gruper@localhost:5433/gruper_test \
 docker rm -f pg-test
 ```
 
+The session fixture drops and re-migrates all tables (Postgres) or uses a
+fresh temp file (SQLite) at the start of each run, so tests always start clean.
+
 **Test coverage:**
 
 | File | What it covers |
@@ -235,8 +278,15 @@ docker rm -f pg-test
 ```
 orchestrator/
 ├── main.py                  FastAPI app: lifespan, CORS, heartbeat + timeout watchdogs, routers
-├── config.py                pydantic-settings: all env-var knobs in one place
-├── database.py              asyncpg pool, JSON/JSONB codecs, migration runner, append_event
+├── config.py                pydantic-settings: all env-var knobs; DATABASE_URL defaults to SQLite
+├── database.py              Thin façade over db/ preserving the pre-WP-30 public API
+├── db/                      Backend abstraction (WP-30) — SQLite default, PostgreSQL opt-in
+│   ├── base.py              Database ABC + Row mapping type
+│   ├── postgres.py          PostgresDatabase — thin asyncpg wrapper (server tier)
+│   ├── sqlite.py            SQLiteDatabase — aiosqlite + SQL dialect adapter (desktop default)
+│   ├── connect.py           Picks a backend from DATABASE_URL's scheme
+│   ├── migrate.py           Dialect-aware migration runner
+│   └── util.py              new_id/now_iso/ts_or_none/is_valid_uuid — cross-backend helpers
 ├── security.py              JWT issue/verify; get_current_user_id dependency
 ├── connection_manager.py    In-memory WS tracker, heartbeat timestamps, stale detection
 ├── dispatcher.py            try_dispatch, dispatch_pending_for_agent, requeue_or_deadletter
@@ -248,18 +298,18 @@ orchestrator/
 ├── ws/
 │   └── agent_ws.py          WS /v1/agents/ws — register, heartbeat, task_ack, progress, result
 ├── migrations/
-│   ├── 001_users.sql        User identity, anchored to ed25519 pubkey
-│   ├── 002_agents.sql       Agent nodes with capability/availability metadata
-│   ├── 003_tasks.sql        Task queue (SKIP LOCKED dispatch index)
-│   └── 004_events.sql       Append-only audit log (hash chain fields null until WP-17)
+│   ├── postgres/            Postgres-flavored DDL (UUID, JSONB, TIMESTAMPTZ, SKIP LOCKED index)
+│   │   ├── 001_users.sql · 002_agents.sql · 003_tasks.sql · 004_events.sql
+│   └── sqlite/               Same schema, SQLite-flavored DDL (TEXT columns throughout)
+│       ├── 001_users.sql · 002_agents.sql · 003_tasks.sql · 004_events.sql
 ├── tests/
-│   ├── conftest.py          Session-scoped fixtures, DB reset, TestClient
+│   ├── conftest.py          Session-scoped fixtures; SQLite temp file by default, Postgres via TEST_DATABASE_URL
 │   ├── test_register.py     REST smoke tests (auth, agent registration)
 │   ├── test_heartbeat.py    WebSocket smoke tests (register, heartbeat, status)
 │   └── test_tasks.py        Task smoke tests (submit, dispatch, lifecycle, retry, idempotency)
-├── docker-compose.yml       PostgreSQL 16 + orchestrator (hot reload for dev)
-├── Dockerfile               Build context: repo root (see inline comment)
-├── requirements.txt
+├── docker-compose.yml       PostgreSQL 16 + orchestrator — server/advanced tier only
+├── Dockerfile               Build context: repo root (see inline comment) — server tier only
+├── requirements.txt         Includes both aiosqlite and asyncpg (see Known Technical Debt)
 ├── pytest.ini               asyncio_mode=auto · pythonpath=..
 └── .env.example             All supported env vars with descriptions
 ```

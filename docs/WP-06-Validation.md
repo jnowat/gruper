@@ -1,8 +1,8 @@
 # WP-06 — End-to-End Relay Validation Report
 
 **Milestone:** `gd-0.2` Walking Skeleton — exit gate
-**Date:** 2026-06-30
-**Status:** ✅ Automated end-to-end relay **validated and green**; 🔲 real two-machine
+**Date:** 2026-06-30 (initial run) · **2026-07-01: re-validated on both orchestrator backends after WP-30**
+**Status:** ✅ Automated end-to-end relay **validated and green on SQLite (desktop default) and PostgreSQL (server tier)**; 🔲 real two-machine
 public-internet/NAT field run pending (runbook in §7).
 
 > **TL;DR** — The full relay (console → orchestrator → agent → Ollama → back to
@@ -11,7 +11,13 @@ public-internet/NAT field run pending (runbook in §7).
 > worked**; all five are fixed. After the fixes the harness is **17/17 green,
 > reproduced across four runs** (including a fresh-container rebuild), with
 > dispatch overhead of **~10–13 ms (p50)** — roughly **800–1000× under** the
-> SC-2 target of < 5–10 s.
+> SC-2 target of < 5–10 s. **Update (WP-30):** the harness now runs against
+> **either** orchestrator backend via `--backend {sqlite,postgres}` (SQLite is
+> the default) and is **17/17 green on both**, with near-identical dispatch
+> latency (SQLite p50 ~10.0 ms vs. PostgreSQL p50 ~9.8 ms on the same host).
+> This is the first time the relay has been validated end to end **without any
+> database server running** — the desktop-tier "no Docker, no Postgres" claim
+> made in `ROADMAP.md` is now backed by this harness, not just unit tests.
 
 ---
 
@@ -20,7 +26,7 @@ public-internet/NAT field run pending (runbook in §7).
 | Component | What ran | Notes |
 |-----------|----------|-------|
 | Orchestrator | the real FastAPI app (`orchestrator.main:app`) under **uvicorn** | real ASGI server on a real TCP port — not `TestClient` |
-| Database | **PostgreSQL 16** (`gruper_e2e`) | exercises the real `SKIP LOCKED` / CTE dispatch + requeue SQL |
+| Database | **SQLite** (default, desktop tier) or **PostgreSQL 16** (`gruper_e2e`, server tier via `--backend postgres`) | SQLite leg needs no external service; Postgres leg exercises the real `SKIP LOCKED` / CTE dispatch + requeue SQL — see WP-30 |
 | Agent runtime | the real **`agent-runtime`** process (`main.py` → `ws_client.py`) | makes an **outbound** WS connection; real circuit breaker + offline queue |
 | Inference | **mock Ollama** (`tests/e2e/mock_ollama.py`) | deterministic streaming `/api/chat`; no GPU / model download in CI |
 | Console | the harness, using `httpx` (REST) + `websockets` (console WS) | speaks the exact console contract from `console/src/lib/types.ts` |
@@ -32,9 +38,18 @@ and is re-runnable:
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -r orchestrator/requirements.txt -r agent-runtime/requirements.txt websockets
-# PostgreSQL reachable as gruper/gruper on localhost:5432 with CREATEDB
-python tests/e2e/wp06_relay_validation.py        # exit 0 ⇒ all checks passed
+
+# Desktop tier (default) — SQLite, no external service needed
+python tests/e2e/wp06_relay_validation.py --backend sqlite    # exit 0 ⇒ all checks passed
+
+# Server tier — needs PostgreSQL reachable as gruper/gruper on localhost:5432 with CREATEDB
+python tests/e2e/wp06_relay_validation.py --backend postgres
 ```
+
+**Still not yet validated by this harness, even after WP-30:** a real Windows
+desktop (this run was Linux), a real Ollama (this run used the mock), and — as
+before — the two-machine public-internet/NAT topology (§7 remains the pending
+field run for that).
 
 ### Why loopback is a faithful test of the relay model
 

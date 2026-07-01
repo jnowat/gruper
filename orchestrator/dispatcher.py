@@ -5,12 +5,19 @@ registration path.
   submit → try_dispatch()           → pushes immediately if agent online
   register → dispatch_pending_for_agent() → drains pending queue on connect
   disconnect → requeue_or_deadletter()   → reschedules or dead-letters
+
+Dispatch claiming works identically on both backends despite using the same
+SQL text: PostgreSQL's `FOR UPDATE SKIP LOCKED` clause is stripped by the
+SQLite backend's generic adapter (see db/sqlite.py) because SQLite
+serializes all writes through a single connection anyway, so no row-level
+lock hint is needed there.
 """
 
 import logging
 from typing import TYPE_CHECKING
 
-import asyncpg
+from .db import Database, Row
+from .db.util import now_iso, ts_or_none
 
 if TYPE_CHECKING:
     from .connection_manager import ConnectionManager
@@ -55,7 +62,7 @@ _TASK_COLS_Q = """
 
 
 async def try_dispatch(
-    pool: asyncpg.Pool,
+    db: Database,
     manager: "ConnectionManager",
     task_id: str,
 ) -> bool:
@@ -67,13 +74,14 @@ async def try_dispatch(
     dispatched over WebSocket; False if the agent is offline or the task
     is no longer pending.
     """
-    row = await pool.fetchrow(
+    row = await db.fetchrow(
         f"""
-        UPDATE tasks SET status = 'dispatched', dispatched_at = NOW()
+        UPDATE tasks SET status = 'dispatched', dispatched_at = $2
         WHERE id = $1::uuid AND status = 'pending'
         RETURNING {_TASK_COLS}
         """,
         task_id,
+        now_iso(),
     )
     if row is None:
         return False  # task gone or already claimed
@@ -81,7 +89,7 @@ async def try_dispatch(
     agent_id = row["assigned_agent_id"]
     if not manager.is_connected(agent_id):
         # Agent is offline — revert to pending so dispatch_pending_for_agent picks it up on reconnect.
-        await pool.execute(
+        await db.execute(
             "UPDATE tasks SET status = 'pending', dispatched_at = NULL WHERE id = $1::uuid",
             task_id,
         )
@@ -93,18 +101,19 @@ async def try_dispatch(
 
 
 async def dispatch_pending_for_agent(
-    pool: asyncpg.Pool,
+    db: Database,
     manager: "ConnectionManager",
     agent_id: str,
 ) -> int:
     """
-    Dispatch all pending tasks for a newly-connected agent.
+    Dispatch all pending tasks for a newly-connected agent, in priority order.
 
-    Uses SKIP LOCKED so concurrent orchestrator instances (or concurrent
-    agent reconnects) do not double-dispatch the same task.
-    Returns the number of tasks sent.
+    On PostgreSQL, `FOR UPDATE SKIP LOCKED` (dropped for SQLite by the
+    generic adapter — see module docstring) guards against double-dispatch
+    if concurrent orchestrator instances or reconnects race. Returns the
+    number of tasks sent.
     """
-    rows = await pool.fetch(
+    rows = await db.fetch(
         f"""
         WITH to_dispatch AS (
             SELECT id FROM tasks
@@ -112,12 +121,13 @@ async def dispatch_pending_for_agent(
             ORDER BY priority DESC, created_at ASC
             FOR UPDATE SKIP LOCKED
         )
-        UPDATE tasks SET status = 'dispatched', dispatched_at = NOW()
+        UPDATE tasks SET status = 'dispatched', dispatched_at = $2
         FROM to_dispatch
         WHERE tasks.id = to_dispatch.id
         RETURNING {_TASK_COLS_Q}
         """,
         agent_id,
+        now_iso(),
     )
     count = 0
     for row in rows:
@@ -128,7 +138,7 @@ async def dispatch_pending_for_agent(
     return count
 
 
-async def requeue_or_deadletter(pool: asyncpg.Pool, agent_id: str) -> None:
+async def requeue_or_deadletter(db: Database, agent_id: str) -> None:
     """
     On agent disconnect, reschedule or dead-letter all active tasks.
 
@@ -136,7 +146,7 @@ async def requeue_or_deadletter(pool: asyncpg.Pool, agent_id: str) -> None:
     - Requeued to 'pending' (retry_count incremented) while retries remain.
     - Moved to 'dead_letter' after _MAX_RETRIES attempts.
     """
-    rows = await pool.fetch(
+    rows = await db.fetch(
         """
         SELECT id::text, retry_count
         FROM tasks
@@ -148,13 +158,13 @@ async def requeue_or_deadletter(pool: asyncpg.Pool, agent_id: str) -> None:
         task_id = row["id"]
         new_retry = row["retry_count"] + 1
         if new_retry >= _MAX_RETRIES:
-            await pool.execute(
+            await db.execute(
                 "UPDATE tasks SET status = 'dead_letter' WHERE id = $1::uuid",
                 task_id,
             )
             logger.warning("Task %s dead-lettered after %d retries", task_id, new_retry)
         else:
-            await pool.execute(
+            await db.execute(
                 """
                 UPDATE tasks
                 SET status = 'pending', retry_count = $2, dispatched_at = NULL
@@ -166,11 +176,8 @@ async def requeue_or_deadletter(pool: asyncpg.Pool, agent_id: str) -> None:
             logger.info("Task %s requeued (retry %d/%d)", task_id, new_retry, _MAX_RETRIES)
 
 
-def _build_task_push(row: asyncpg.Record) -> dict:
+def _build_task_push(row: Row) -> dict:
     """Build a task_push WebSocket message from a tasks row."""
-    def ts(val):
-        return val.isoformat() if val is not None else None
-
     return {
         "type": "task_push",
         "task": {
@@ -182,11 +189,11 @@ def _build_task_push(row: asyncpg.Record) -> dict:
             "allowed_tools":     list(row["allowed_tools"]) if row["allowed_tools"] else [],
             "status":            "dispatched",
             "priority":          row["priority"],
-            "deadline":          ts(row["deadline"]),
+            "deadline":          ts_or_none(row["deadline"]),
             "timeout_s":         row["timeout_s"],
             "retry_count":       row["retry_count"],
-            "created_at":        ts(row["created_at"]),
-            "dispatched_at":     ts(row["dispatched_at"]),
+            "created_at":        ts_or_none(row["created_at"]),
+            "dispatched_at":     ts_or_none(row["dispatched_at"]),
         },
         "ack_deadline_s": 10,
     }
