@@ -32,6 +32,7 @@
   import { get } from 'svelte/store';
   import { authStore, generateRandomPubkey } from '$lib/stores/auth.js';
   import { fleetStore } from '$lib/stores/fleet.js';
+  import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
   import type { Agent, AgentCapabilities } from '$lib/types.js';
 
@@ -57,6 +58,16 @@
   let ollamaState = $state<OllamaState>('idle');
   let ollamaMessage = $state<string | null>(null);
   let detectedModels = $state<string[]>([]);
+  // The model this agent will use by default (picked by the user, not silently
+  // detectedModels[0]). Kept valid as detection results change.
+  let defaultModel = $state('');
+  $effect(() => {
+    if (detectedModels.length === 0) {
+      defaultModel = '';
+    } else if (!detectedModels.includes(defaultModel)) {
+      defaultModel = detectedModels[0];
+    }
+  });
 
   let error = $state<string | null>(null);
   let timedOut = $state(false);
@@ -305,6 +316,7 @@
 
     const capabilities: AgentCapabilities = {
       models: detectedModels,
+      default_model: defaultModel || detectedModels[0],
       roles: [role],
       tools: [],
       hardware: {
@@ -318,6 +330,7 @@
     let agent: Agent;
     try {
       step = 'registering';
+      logStore.frontend('info', 'ui', `registering agent "${name.trim() || 'Local Agent'}" (default model ${capabilities.default_model})`);
       agent = await client.registerAgent({
         name: name.trim() || 'Local Agent',
         pubkey: generateRandomPubkey(),
@@ -325,14 +338,17 @@
         runtime_version: RUNTIME_VERSION,
       });
       fleetStore.add(agent);
+      logStore.frontend('info', 'ui', `agent registered with orchestrator`, { agent_id: agent.id });
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
+      logStore.frontend('error', 'ui', `agent registration failed: ${error}`);
       step = 'form';
       return;
     }
 
     try {
       step = 'spawning';
+      logStore.frontend('info', 'ui', 'starting local agent sidecar', { agent_id: agent.id });
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('spawn_local_agent', {
         agentId: agent.id,
@@ -449,7 +465,7 @@
 
         {#if ollamaState === 'ready'}
           <p class="text-xs mt-1 text-emerald-400">
-            Found {detectedModels.length} model{detectedModels.length === 1 ? '' : 's'}: {detectedModels.join(', ')}
+            Found {detectedModels.length} model{detectedModels.length === 1 ? '' : 's'}.
           </p>
         {:else if ollamaState === 'no_models'}
           <p class="text-xs mt-1 text-amber-400">{ollamaMessage}</p>
@@ -461,6 +477,24 @@
           <p class="text-xs mt-1 text-slate-500">Checking for installed models…</p>
         {/if}
       </div>
+
+      {#if ollamaState === 'ready' && detectedModels.length > 0}
+        <div>
+          <label class="block text-xs text-slate-400 mb-1" for="agent-default-model">Default model</label>
+          <select
+            id="agent-default-model"
+            bind:value={defaultModel}
+            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+          >
+            {#each detectedModels as m}
+              <option value={m} class="bg-slate-800 text-white">{m}</option>
+            {/each}
+          </select>
+          <p class="text-xs mt-1 text-slate-500">
+            The model this agent runs by default. All {detectedModels.length} detected model{detectedModels.length === 1 ? '' : 's'} stay available for per-task overrides.
+          </p>
+        </div>
+      {/if}
 
       <div>
         <label class="block text-xs text-slate-400 mb-1" for="agent-role">Role template</label>

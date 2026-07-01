@@ -19,10 +19,15 @@ _RUNTIME_VERSION_RE = re.compile(r"^gd-\d+\.\d+\.\d+")
 
 
 class AgentCapabilities(BaseModel):
-    models:   list[str]       = Field(..., min_length=1)
-    roles:    list[str]       = Field(..., min_length=1)
-    tools:    list[str]       = Field(default_factory=list)
-    hardware: dict[str, Any]  = Field(default_factory=dict)
+    models:        list[str]       = Field(..., min_length=1)
+    # The model the agent uses by default when a task doesn't pin one. Chosen
+    # explicitly in "Add Local Agent" rather than silently defaulting to
+    # models[0] (see agent-runtime/ws_client.py::_model_and_options). Optional
+    # for backward compatibility with agents registered before it existed.
+    default_model: str | None      = None
+    roles:         list[str]       = Field(..., min_length=1)
+    tools:         list[str]       = Field(default_factory=list)
+    hardware:      dict[str, Any]  = Field(default_factory=dict)
 
 
 class AgentAvailability(BaseModel):

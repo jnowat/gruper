@@ -1,5 +1,6 @@
 import { fleetStore } from '$lib/stores/fleet.js';
 import { tasksStore } from '$lib/stores/tasks.js';
+import { wsStatus } from '$lib/stores/wsStatus.js';
 import type { ConsoleMessage } from '$lib/types.js';
 
 const BACKOFF_MS = [2000, 4000, 8000, 16000]; // mirrors Gruper core's retry discipline
@@ -25,12 +26,15 @@ export class ConsoleWS {
     if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
     this.ws?.close(1000, 'console logout');
     this.ws = null;
+    wsStatus.set('closed');
   }
 
   private _open(): void {
     // Convert http/https base URL to ws/wss for the console WS endpoint.
     const wsBase = this.baseUrl.replace(/^http/, 'ws');
     const url = `${wsBase}/v1/console/ws?token=${encodeURIComponent(this.token)}`;
+
+    wsStatus.set(this._retries > 0 ? 'reconnecting' : 'connecting');
 
     try {
       this.ws = new WebSocket(url);
@@ -43,6 +47,7 @@ export class ConsoleWS {
     this.ws.onopen = () => {
       console.info('[ConsoleWS] Connected to', this.baseUrl);
       this._retries = 0;
+      wsStatus.set('live');
     };
 
     this.ws.onmessage = (ev) => {
@@ -56,6 +61,7 @@ export class ConsoleWS {
     this.ws.onclose = (ev) => {
       if (!this._intentionalClose) {
         console.warn('[ConsoleWS] Disconnected (code=%d) — scheduling reconnect', ev.code);
+        wsStatus.set('reconnecting');
         fleetStore.markAllOffline();
         this._scheduleReconnect();
       }

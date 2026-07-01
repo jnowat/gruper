@@ -15,6 +15,14 @@ export type DataClass = 'public' | 'internal' | 'confidential';
 
 export interface AgentCapabilities {
   models: string[];
+  /**
+   * The model the agent uses by default when a task does not pin one via
+   * model_preferences.name. Chosen explicitly in "Add Local Agent" rather than
+   * silently defaulting to models[0] (see agent-runtime/ws_client.py). Optional
+   * for backward compatibility with agents registered before this field
+   * existed — the runtime falls back to models[0] then.
+   */
+  default_model?: string;
   roles: string[];
   tools: string[];
   hardware: {
@@ -155,3 +163,20 @@ export type ConsoleMessage =
   | TaskProgressEvent
   | TaskCompleteEvent
   | QueueDepthEvent;
+
+// ── Unified debug log (Desktop Hardening) ─────────────────────────────────────
+// Mirrors the LogEntry struct in console/src-tauri/src/lib.rs and the JSON line
+// shape emitted by {orchestrator,agent-runtime}/structured_log.py.
+
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export interface LogEntry {
+  ts: string; // ISO-8601 UTC
+  level: LogLevel;
+  category: string; // orchestrator | agent | sidecar | auth | task | ui | ws | ollama | error | …
+  tier: string; // orchestrator | agent | rust | frontend
+  agent_id?: string | null;
+  task_id?: string | null;
+  msg: string;
+  fields?: Record<string, unknown>;
+}

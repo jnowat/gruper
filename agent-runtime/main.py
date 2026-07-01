@@ -32,13 +32,14 @@ import threading
 import time
 
 from config import settings
+from structured_log import configure_logging
 from ws_client import AgentWSClient
 
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
+# Structured, category-tagged logging: emits one JSON line per record on stdout,
+# which the Console drains and parses into its unified debug log (see
+# agent-runtime/structured_log.py and console/src-tauri/src/lib.rs). Replaces
+# logging.basicConfig so a freshly-spawned agent's activity is observable.
+configure_logging("agent", settings.log_level)
 logger = logging.getLogger(__name__)
 
 _MAX_ANCESTOR_DEPTH = 6

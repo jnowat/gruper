@@ -11,10 +11,15 @@ from .connection_manager import manager
 from .database import close_db, get_pool, init_db, run_migrations
 from .db.util import now_iso
 from .routers import agents, auth, health, tasks
+from .structured_log import configure_logging
 from .ws.agent_ws import handle_agent_ws
 from .ws.console_ws import handle_console_ws
 
-logging.basicConfig(level=settings.log_level)
+# Structured, category-tagged logging: emits one JSON line per record on stdout,
+# which the Console drains and parses into its unified debug log (see
+# orchestrator/structured_log.py and console/src-tauri/src/lib.rs). Replaces
+# logging.basicConfig so the desktop tier gets observable, exportable logs.
+configure_logging("orchestrator", settings.log_level)
 logger = logging.getLogger(__name__)
 
 # PostgreSQL's INTERVAL arithmetic has no SQLite equivalent (dispatched_at
