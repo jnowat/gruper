@@ -34,6 +34,12 @@ serde_json = "1"
 # used by spawn_local_agent's early-crash grace-period check.
 tokio = { version = "1", features = ["net", "io-util", "time", "macros"] }
 
+[dev-dependencies]
+# "rt" (a real runtime, only needed to actually execute async tests) is kept
+# out of [dependencies] above so it isn't linked into the shipped binary —
+# dev-dependencies only apply when building tests, not `cargo build`/release.
+tokio = { version = "1", features = ["rt", "macros"] }
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
