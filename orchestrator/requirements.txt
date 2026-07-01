@@ -2,6 +2,9 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 aiosqlite>=0.20.0
 asyncpg>=0.29.0
+# Only used by orchestrator/packaging/entry.py's orphan-detection watchdog
+# (WP-32) — not imported anywhere in the orchestrator's normal run path.
+psutil>=5.9.0
 pydantic>=2.7.0
 pydantic-settings>=2.3.0
 python-jose[cryptography]>=3.3.0

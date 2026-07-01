@@ -6,6 +6,16 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# PyInstaller build output (WP-31 desktop packaging) — built by
+# scripts/build-desktop.sh/.ps1 or CI, never committed
+/dist/
+/build/
+.build-venv/
+
+# Tauri sidecar binary (WP-32) — staged by scripts/build-desktop.sh/.ps1 or
+# CI from the PyInstaller build above; platform-specific, never committed
+console/src-tauri/binaries/
+
 # Virtual environments
 .venv/
 .venv-*/
@@ -16,6 +26,9 @@ env/
 .env
 .env.*
 !.env.example
+
+# Auto-generated JWT secret for zero-config desktop runs (orchestrator/config.py)
+.gruper_jwt_secret
 
 # SQLite DBs created at runtime (agent offline queue; orchestrator desktop-default store)
 agent.db

@@ -21,8 +21,17 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-store = "2"
+# WP-32: spawn and manage the bundled orchestrator as a sidecar process.
+tauri-plugin-shell = "2"
+# WP-32: only one Console instance manages a sidecar orchestrator at a time —
+# a second launch forwards to the first instead of starting its own.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# WP-32: async TCP + timers for the sidecar health check (see check_health in
+# lib.rs) — minimal feature set, no full runtime/macros (tauri's own async
+# runtime already drives execution; we only need the I/O primitives).
+tokio = { version = "1", features = ["net", "io-util", "time"] }
 
 [profile.release]
 panic = "abort"

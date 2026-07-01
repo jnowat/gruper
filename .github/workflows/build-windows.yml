@@ -12,6 +12,20 @@ name: Build Windows Installer
 #     If the build fails, a BUILD-DIAGNOSTICS artifact (logs + `tauri info`) is
 #     uploaded instead, so every run leaves something downloadable.
 #
+#   WP-31/WP-32 (desktop-first packaging): this job also builds standalone
+#   Windows executables for the orchestrator and agent runtime (PyInstaller —
+#   no Python install needed on the machine that runs them) and uploads them
+#   as their own artifacts, independent of console readiness. The orchestrator
+#   executable is additionally copied into console/src-tauri/binaries/ so the
+#   Tauri build below bundles it as a sidecar (see tauri.conf.json's
+#   `bundle.externalBin`) — the Console can spawn it automatically on launch.
+#   This is the only way to produce a real Windows .exe without Windows
+#   hardware: PyInstaller does not cross-compile, so these steps must run ON
+#   a Windows runner, same as the existing Tauri build below. Built and
+#   validated on Linux during development (see ROADMAP.md WP-31 notes); not
+#   personally verified on real Windows hardware — this CI run is the first
+#   time these exact steps execute on Windows.
+#
 # Triggers:
 #   push to main        → artifact upload only
 #   push to claude/**   → artifact upload (lets Claude's feature branches produce
@@ -81,6 +95,56 @@ jobs:
               fh.write(f"ready={value}\n")
               fh.write(f"ref_label={ref_label}\n")
           print(f"Console ready: {value} | ref_label: {ref_label}")
+
+      # ════════════════════════════════════════════════════════════════════════
+      # WP-31/WP-32 — desktop executables (orchestrator + agent runtime)
+      # Independent of console readiness: these are plain PyInstaller builds,
+      # no Node/Rust/Tauri toolchain involved. Runs unconditionally so the
+      # standalone executables are produced (and, for the orchestrator,
+      # staged as a Tauri sidecar binary) on every run of this workflow.
+      # ════════════════════════════════════════════════════════════════════════
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build orchestrator + agent desktop executables (PyInstaller)
+        id: desktop_build
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r orchestrator/requirements.txt -r agent-runtime/requirements.txt pyinstaller
+          pyinstaller orchestrator/packaging/gruper-orchestrator.spec --distpath dist --workpath build --noconfirm
+          pyinstaller agent-runtime/packaging/gruper-agent.spec --distpath dist --workpath build --noconfirm
+          ls -la dist/
+
+      - name: Stage orchestrator executable as a Tauri sidecar binary
+        # Only meaningful once the console project exists to bundle it into.
+        # Tauri's sidecar convention requires the binary be named
+        # <name>-<target-triple>.exe, matching the externalBin entry in
+        # tauri.conf.json (bundle.externalBin: ["binaries/gruper-orchestrator"]).
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        shell: bash
+        run: |
+          mkdir -p console/src-tauri/binaries
+          cp dist/gruper-orchestrator.exe console/src-tauri/binaries/gruper-orchestrator-x86_64-pc-windows-msvc.exe
+
+      - name: Upload orchestrator executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-orchestrator-${{ steps.readiness.outputs.ref_label }}-windows-x64.exe
+          path: dist/gruper-orchestrator.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload agent runtime executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: gruper-agent-${{ steps.readiness.outputs.ref_label }}-windows-x64.exe
+          path: dist/gruper-agent.exe
+          retention-days: 30
+          if-no-files-found: error
 
       # ════════════════════════════════════════════════════════════════════════
       # PATH A — console not yet scaffolded
@@ -313,9 +377,18 @@ jobs:
           ref_name = "${{ github.ref_name }}"
 
           lines = ["## Gruper Console - Windows Build", ""]
+          lines += [
+              "**Desktop executables (WP-31/WP-32 — always built):**",
+              "",
+              "| Artifact | Notes |",
+              "|----------|-------|",
+              "| `gruper-orchestrator-*-windows-x64.exe` | Standalone orchestrator — no Python/Docker/PostgreSQL needed on the target machine; SQLite default |",
+              "| `gruper-agent-*-windows-x64.exe` | Standalone agent runtime |",
+              "",
+          ]
           if ready != "true":
               lines += [
-                  "**Status: waiting for WP-05**",
+                  "**Console status: waiting for WP-05**",
                   "",
                   "The Manager Console Tauri project (`console/`) has not been scaffolded yet.",
                   "**`gruper-console-windows-PLACEHOLDER`** has been uploaded to this run's",
@@ -326,11 +399,11 @@ jobs:
               ]
           else:
               lines += [
-                  "**Status: complete**",
+                  "**Console status: complete**",
                   "",
                   "| Artifact | Format | Notes |",
                   "|----------|--------|-------|",
-                  "| `*-setup.exe` | NSIS installer | No admin rights required |",
+                  "| `*-setup.exe` | NSIS installer | Bundles the orchestrator as a sidecar (WP-32) — launching the Console starts a local orchestrator automatically |",
                   "| `*.msi` | WiX MSI | Enterprise / Group Policy compatible |",
                   "",
                   "Artifacts attached to this run (30-day retention).",

@@ -116,32 +116,51 @@ A companion system that extends Gruper Core across multiple machines and multipl
 
 ### Current status
 
-**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is nearly there — task dispatch, the Manager Console scaffold, **and end-to-end relay validation (WP-06)** are done. The automated E2E harness drives the real relay (console → orchestrator → agent → Ollama → back) and is **17/17 green**; running it for the first time surfaced and fixed five message-contract bugs that had silently prevented dispatch from ever working. The one remaining `gd-0.2` gate is the real two-machine public-internet/NAT field run — see the [WP-06 validation report](docs/WP-06-Validation.md).
+**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is nearly there — task dispatch, the Manager Console scaffold, **and end-to-end relay validation (WP-06)** are done. The automated E2E harness drives the real relay (console → orchestrator → agent → Ollama → back) and is **17/17 green**; running it for the first time surfaced and fixed five message-contract bugs that had silently prevented dispatch from ever working. **Phase 1.5 (desktop-first foundation) is also code-complete and validated on Linux:** the orchestrator defaults to SQLite (WP-30), both the orchestrator and agent are packaged as self-contained executables (WP-31), and the Console auto-starts and auto-connects to a local orchestrator with zero manual steps (WP-32) — see the desktop quick start below. The remaining gates are the real two-machine public-internet/NAT field run (`gd-0.2`) and running the desktop packaging/auto-run stack on a real Windows machine (`gd-0.2.x`, WP-31/WP-32) — see [ROADMAP.md](ROADMAP.md) for the honest current state.
 
-**What's shipped (`gd-0.1` / `gd-0.2`):**
+**What's shipped (`gd-0.1` / `gd-0.2` / `gd-0.2.x`):**
 
 | Component | Status | Notes |
 |-----------|--------|-------|
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
-| `orchestrator/` | ✅ Running | FastAPI, JWT auth, task dispatch + result relay, console WS (WP-04/05); **SQLite by default, PostgreSQL opt-in for the server tier (WP-30)** |
-| `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker; dispatch contract aligned + validated in WP-06 |
-| `console/` | ✅ Scaffold complete | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; frontend build verified |
-| end-to-end relay | ✅ Automated E2E green | `tests/e2e/` drives the real relay 17/17; real-NAT field run pending ([WP-06 report](docs/WP-06-Validation.md)) |
+| `orchestrator/` | ✅ Running, packaged | FastAPI, JWT auth (auto-generated on first run), task dispatch + result relay, console WS; **SQLite by default, PostgreSQL opt-in for the server tier (WP-30)**; self-contained executable via PyInstaller (WP-31) |
+| `agent-runtime/` | ✅ Code complete, packaged | Outbound WSS client, Ollama, offline queue, circuit breaker; dispatch contract validated in WP-06; self-contained executable via PyInstaller (WP-31) |
+| `console/` | ✅ Scaffold complete, auto-connect | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; **auto-starts and auto-connects to a local orchestrator sidecar with zero manual steps (WP-32)** |
+| end-to-end relay | ✅ Automated E2E green | `tests/e2e/` drives the real relay 17/17 on both SQLite and PostgreSQL; real-NAT field run pending ([WP-06 report](docs/WP-06-Validation.md)) |
 
-**Manager Console (`gd-0.2` / WP-05) — run it locally:**
+**⚠️ Honest caveat:** WP-31/WP-32 above were built and verified on **Linux only** — no Windows hardware was available during that work. A Windows CI build job was added and Windows-specific code paths were written carefully, but neither has been run and confirmed on a real Windows machine yet. See [ROADMAP.md](ROADMAP.md) for the specifics.
+
+### Desktop quick start (no Docker, no PostgreSQL, no manual Python)
+
+This is the primary way to run the full stack (Console + Orchestrator + Agent) locally. Docker + PostgreSQL remain available as an **advanced / server** option — see [Server deployment](#server-deployment-docker--postgresql-advanced) below.
+
+**Option A — Windows installer (recommended for most users):** download the latest Console installer from the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) workflow's Artifacts (see [Downloads](#downloads) below). Install and launch it — the Console bundles the orchestrator as a background process and starts it automatically on launch; you land straight on the fleet dashboard with no separate orchestrator step and no manual configuration. Ollama is the one remaining external prerequisite (see [Quick Start](#quick-start) above).
+
+**Option B — build from source (any platform), one command:**
 
 ```bash
-cd console
-npm install          # package-lock.json is committed; this restores the exact tree
-npm run dev          # starts Vite dev server on :5173
-cd src-tauri && cargo build   # verify the Tauri Rust shell compiles
-# Then in a separate terminal:
-npx tauri dev        # launches the desktop app against the running dev server
+git clone https://github.com/jnowat/gruper.git
+cd gruper
+./scripts/build-desktop.sh          # macOS/Linux
+# .\scripts\build-desktop.ps1       # Windows PowerShell
 ```
 
-To connect the console, start the orchestrator first — `cd orchestrator && pip install -r requirements.txt && uvicorn main:app --port 8080` uses a local SQLite file with no Docker or PostgreSQL (see [`orchestrator/README.md`](orchestrator/README.md); `docker compose up` remains available for the PostgreSQL/server tier) — then enter the orchestrator URL and your public key in the Connect dialog.
+This creates a build venv, installs both Python runtimes' dependencies, packages the orchestrator and agent as self-contained executables with PyInstaller (`dist/`), and stages the orchestrator as the Console's Tauri sidecar binary. Both executables are zero-config: SQLite database and JWT secret are created automatically on first run, bound to `127.0.0.1` only.
 
-**Next:** the real two-machine public-internet/NAT field run — the last `gd-0.2` exit-gate step. The relay logic, dispatch, requeue-on-disconnect, and live console event stream are already validated by the committed [`tests/e2e`](tests/e2e) harness ([report](docs/WP-06-Validation.md)); the field run confirms it on real hardware over `wss://`.
+Then launch the Console the same way as any Tauri app in this repo (`cd console && npm install && npm run dev`, then in another terminal `npx tauri dev` — see [Contributing](#contributing) for the full dev loop) — it will detect the staged sidecar, start it, and auto-connect. To run the packaged agent standalone instead of through the Console, run `dist/gruper-agent` (or `dist\gruper-agent.exe` on Windows) directly.
+
+To validate the packaged executables end to end without any of the above (useful for CI or a quick sanity check), run `python scripts/validate-desktop-packaging.py` — it spins up a mock Ollama, the real packaged orchestrator and agent binaries, and confirms a task relays through successfully.
+
+### Server deployment (Docker + PostgreSQL, advanced)
+
+Use this tier for multi-user, multi-tenant, or always-on hosting — a VPS, an internal server, or a cloud host serving several collaborators. It is **not** needed for a single desktop user; see the desktop quick start above for that case.
+
+```bash
+cd orchestrator
+docker compose up      # PostgreSQL + orchestrator, DATABASE_URL set to postgresql://...
+```
+
+See [`orchestrator/README.md`](orchestrator/README.md) for the full Docker Compose setup, environment variables, and how to point agents/Console at a shared server-tier orchestrator instead of a local one.
 
 ### Architecture
 
@@ -223,17 +242,26 @@ workflow runs on pushes to `main`, on pull requests into `main`, on `v*` tags, o
 without opening a PR), and on manual dispatch. The console scaffold (WP-05)
 compiles end-to-end, so the workflow builds **real** installers — download them
 from the workflow run's **Artifacts**. Every run leaves a downloadable artifact:
-the installers on success, or a `BUILD-DIAGNOSTICS.txt` if the build fails.
+the installers on success, or a `BUILD-DIAGNOSTICS.txt` if the build fails. The
+same workflow also builds and uploads the packaged orchestrator and agent
+executables (WP-31), and bundles the orchestrator into the Console installer as
+a sidecar (WP-32) — so installing the Console is meant to be the entire desktop
+setup, with no separate orchestrator step.
 
 | Build leg | Output | How to get it |
 |-----------|--------|---------------|
 | NSIS | `*-setup.exe` — portable installer, no admin rights | [Latest workflow run](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) → Artifacts |
 | WiX | `*.msi` — enterprise / Group Policy compatible | Same link |
-| Tagged `v*` | both, attached to a **draft** GitHub Release | [GitHub Releases](https://github.com/jnowat/gruper/releases) — publish manually |
+| Orchestrator / Agent | `gruper-orchestrator.exe` / `gruper-agent.exe` — standalone executables, same artifacts page | Same link |
+| Tagged `v*` | all of the above, attached to a **draft** GitHub Release | [GitHub Releases](https://github.com/jnowat/gruper/releases) — publish manually |
 
 The `.exe` (NSIS) and `.msi` (WiX) installers are built on **GitHub Actions'
 Windows runner** — native Windows MSVC binaries cannot be cross-compiled from
-Linux or macOS, so the installers come from CI rather than a local build.
+Linux or macOS, so the installers come from CI rather than a local build. The
+same is true of the orchestrator/agent `.exe`s (PyInstaller does not cross-compile
+either). **Honest caveat:** this Windows CI job was written and reviewed carefully
+but has not yet been watched succeed and downloaded/run on a real Windows machine
+as part of the WP-31/WP-32 work — see [ROADMAP.md](ROADMAP.md) for specifics.
 
 > **Status:** The console scaffold builds end-to-end. Both the frontend
 > (`npm ci && npm run build && npm run check`) **and** the Tauri Rust shell
@@ -262,6 +290,18 @@ certificate before v1.0.
 **Core (`Gruper.html`)** — single-file patches. Keep it browser-only with no build step. Open an issue first for anything beyond a bug fix.
 
 **Distributed (`spec/`, `orchestrator/`, `agent-runtime/`, `console/`)** — start with [`GruperDistributedSpec.md`](GruperDistributedSpec.md) and [`ROADMAP.md`](ROADMAP.md). Read the contracts package (`spec/contracts/`) before writing any code — the schema freeze is the foundation everything else builds against.
+
+**Console dev loop** (hot-reload against source, rather than a packaged sidecar):
+
+```bash
+cd console
+npm install          # package-lock.json is committed; this restores the exact tree
+npm run dev          # starts Vite dev server on :5173
+# in a separate terminal:
+npx tauri dev        # launches the desktop app against the running dev server
+```
+
+For this to auto-connect like a packaged build, first stage a sidecar binary once with `../scripts/build-desktop.sh` (or run the orchestrator separately with `cd orchestrator && uvicorn main:app --port 8080` and let the Console detect it as an already-running orchestrator instead).
 
 Issues and pull requests: [github.com/jnowat/gruper/issues](https://github.com/jnowat/gruper/issues)
 
