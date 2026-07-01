@@ -32,6 +32,28 @@
 //! installer launch's CWD is commonly `C:\Program Files\...`, which is not
 //! writable by a non-admin user — an unhandled write failure there is a
 //! real crash risk, not a hypothetical one.
+//!
+//! `detect_ollama_models` exists because the obvious approach — calling
+//! `fetch("http://localhost:11434/api/tags")` directly from the frontend —
+//! does NOT work reliably from inside the Tauri webview, even when Ollama is
+//! genuinely running with models installed. Confirmed on real Windows
+//! hardware: Chromium/WebView2 enforces Private Network Access (PNA) for any
+//! request from a page's origin into a more-private address space; Tauri's
+//! app origin (`https://tauri.localhost` on Windows, `tauri://localhost`
+//! elsewhere) does not get automatically classified as "local" the way a
+//! page served by a plain `python -m http.server` on `localhost` does, so
+//! the browser sends a preflight requiring an
+//! `Access-Control-Allow-Private-Network: true` response header — which
+//! Ollama's server never sends — and silently fails the request with a
+//! generic network error indistinguishable from "Ollama isn't running" at
+//! the JS layer. This is a known class of Tauri/Chromium issue, not
+//! speculation. The fix is to make the request from Rust instead: a plain
+//! `tokio::net::TcpStream` is not a browser page and is not subject to CORS,
+//! PNA, or mixed-content rules at all, so it reaches a real local Ollama
+//! reliably. `AddAgentDialog.svelte` calls this command when running under
+//! Tauri and falls back to a plain `fetch()` only for the non-Tauri
+//! browser-dev-tab case (where the same PNA rule does not apply, since a
+//! Vite dev server is itself served from `localhost`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -112,7 +134,8 @@ pub fn run() {
         )))
         .invoke_handler(tauri::generate_handler![
             get_orchestrator_status,
-            spawn_local_agent
+            spawn_local_agent,
+            detect_ollama_models
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -483,4 +506,302 @@ async fn check_health() -> bool {
 
     let text = String::from_utf8_lossy(&buf);
     text.starts_with("HTTP/1.0 200") || text.starts_with("HTTP/1.1 200")
+}
+
+/// Result of probing an Ollama instance for installed models. Distinguishes
+/// "couldn't even connect" (`reachable: false`) from "connected, but
+/// something about the response was off" (`reachable: true`, `error` set,
+/// `models` empty) from the happy path — the frontend needs all three to
+/// show the user an accurate, actionable message instead of one generic
+/// "not reachable" for every failure mode.
+#[derive(serde::Serialize)]
+struct OllamaProbeResult {
+    reachable: bool,
+    models: Vec<String>,
+    error: Option<String>,
+}
+
+/// Splits `http://host[:port][/path]` into its parts without pulling in a
+/// full URL-parsing crate for this single call site. Ollama's own server is
+/// plain HTTP only (no TLS support), so that's all this needs to handle;
+/// anything else is rejected with a clear message rather than silently
+/// mishandled.
+fn parse_http_url(url: &str) -> Result<(String, u16), String> {
+    let rest = url.trim().strip_prefix("http://").ok_or_else(|| {
+        "Ollama's URL must start with http:// (Ollama does not serve HTTPS)".to_string()
+    })?;
+    let authority = match rest.find('/') {
+        Some(i) => &rest[..i],
+        None => rest,
+    };
+    if authority.is_empty() {
+        return Err(format!("'{url}' is not a valid URL"));
+    }
+    match authority.rsplit_once(':') {
+        Some((host, port_str)) if !host.is_empty() => {
+            let port = port_str
+                .parse::<u16>()
+                .map_err(|_| format!("'{port_str}' is not a valid port in '{url}'"))?;
+            Ok((host.to_string(), port))
+        }
+        _ => Ok((authority.to_string(), 80)),
+    }
+}
+
+/// Best-effort chunked-transfer-encoding decoder. Not used on the normal
+/// path — see the comment below on why the HTTP/1.0 request line generally
+/// avoids this — but kept as defense in depth rather than assuming it never
+/// happens. Malformed/truncated chunk data returns whatever was decoded so
+/// far rather than failing outright.
+fn dechunk(body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = body;
+    loop {
+        let Some(nl) = rest.windows(2).position(|w| w == b"\r\n") else {
+            break;
+        };
+        let size_str = String::from_utf8_lossy(&rest[..nl]);
+        let size_str = size_str.split(';').next().unwrap_or("").trim();
+        let Ok(size) = usize::from_str_radix(size_str, 16) else {
+            break;
+        };
+        if size == 0 {
+            break;
+        }
+        let chunk_start = nl + 2;
+        let chunk_end = (chunk_start + size).min(rest.len());
+        out.extend_from_slice(&rest[chunk_start..chunk_end]);
+        if chunk_end + 2 > rest.len() {
+            break;
+        }
+        rest = &rest[chunk_end + 2..];
+    }
+    out
+}
+
+/// Probes an Ollama instance for installed models by talking raw HTTP/1.0
+/// over a `tokio::net::TcpStream` — deliberately NOT `fetch()` from the
+/// frontend. See this module's top-level doc comment for why: the webview's
+/// own network stack blocks this exact request via Private Network Access,
+/// even when Ollama is genuinely running with models installed, which is
+/// what a real Windows test run surfaced. A Rust-side socket is not a
+/// browser page and isn't subject to that restriction at all.
+#[tauri::command]
+async fn detect_ollama_models(url: String) -> Result<OllamaProbeResult, String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+
+    let (host, port) = parse_http_url(&url)?;
+    let addr = format!("{host}:{port}");
+
+    let mut stream = match timeout(Duration::from_millis(2500), TcpStream::connect(&addr)).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            return Ok(OllamaProbeResult {
+                reachable: false,
+                models: vec![],
+                error: Some(format!("could not connect to {url}: {e}")),
+            })
+        }
+        Err(_) => {
+            return Ok(OllamaProbeResult {
+                reachable: false,
+                models: vec![],
+                error: Some(format!("timed out connecting to {url}")),
+            })
+        }
+    };
+
+    // HTTP/1.0, not 1.1: a well-behaved server (Ollama included — it's a
+    // plain Go net/http server) will not switch to chunked transfer
+    // encoding for a client that identifies as HTTP/1.0, since chunked
+    // encoding is an HTTP/1.1-only feature. That sidesteps needing a fully
+    // general chunked decoder on the happy path (dechunk() above still
+    // exists as a defensive fallback, not the primary path).
+    let req =
+        format!("GET /api/tags HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    if let Err(e) = stream.write_all(req.as_bytes()).await {
+        return Ok(OllamaProbeResult {
+            reachable: false,
+            models: vec![],
+            error: Some(format!("could not send request to {url}: {e}")),
+        });
+    }
+
+    let mut buf = Vec::new();
+    if timeout(Duration::from_millis(5000), stream.read_to_end(&mut buf))
+        .await
+        .is_err()
+    {
+        return Ok(OllamaProbeResult {
+            reachable: false,
+            models: vec![],
+            error: Some(format!("timed out reading a response from {url}")),
+        });
+    }
+
+    let sep = b"\r\n\r\n";
+    let split_at = buf.windows(sep.len()).position(|w| w == sep);
+    let (head_bytes, body_bytes): (&[u8], &[u8]) = match split_at {
+        Some(pos) => (&buf[..pos], &buf[pos + sep.len()..]),
+        None => (&buf[..], &[]),
+    };
+    let head = String::from_utf8_lossy(head_bytes);
+
+    let status_line = head.lines().next().unwrap_or("");
+    if !(status_line.starts_with("HTTP/1.0 200") || status_line.starts_with("HTTP/1.1 200")) {
+        return Ok(OllamaProbeResult {
+            reachable: true,
+            models: vec![],
+            error: Some(format!(
+                "Ollama responded unexpectedly ({})",
+                if status_line.is_empty() { "empty response" } else { status_line }
+            )),
+        });
+    }
+
+    let is_chunked = head.to_ascii_lowercase().contains("transfer-encoding: chunked");
+    let body_owned;
+    let body: &[u8] = if is_chunked {
+        body_owned = dechunk(body_bytes);
+        &body_owned
+    } else {
+        body_bytes
+    };
+
+    let parsed: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(OllamaProbeResult {
+                reachable: true,
+                models: vec![],
+                error: Some(format!("could not parse Ollama's response as JSON: {e}")),
+            })
+        }
+    };
+
+    let models: Vec<String> = parsed
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(OllamaProbeResult {
+        reachable: true,
+        models,
+        error: None,
+    })
+}
+
+#[cfg(test)]
+mod ollama_probe_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    #[test]
+    fn parse_http_url_with_port() {
+        assert_eq!(
+            parse_http_url("http://localhost:11434").unwrap(),
+            ("localhost".to_string(), 11434)
+        );
+        assert_eq!(
+            parse_http_url("http://127.0.0.1:11434/api/tags").unwrap(),
+            ("127.0.0.1".to_string(), 11434)
+        );
+    }
+
+    #[test]
+    fn parse_http_url_without_port_defaults_to_80() {
+        assert_eq!(
+            parse_http_url("http://localhost").unwrap(),
+            ("localhost".to_string(), 80)
+        );
+    }
+
+    #[test]
+    fn parse_http_url_rejects_https() {
+        assert!(parse_http_url("https://localhost:11434").is_err());
+    }
+
+    #[test]
+    fn parse_http_url_rejects_garbage() {
+        assert!(parse_http_url("not a url").is_err());
+        assert!(parse_http_url("http://").is_err());
+    }
+
+    #[test]
+    fn dechunk_decodes_simple_chunked_body() {
+        let chunked = b"4\r\ntest\r\n5\r\nhello\r\n0\r\n\r\n";
+        assert_eq!(dechunk(chunked), b"testhello".to_vec());
+    }
+
+    /// End-to-end against a real TCP listener standing in for Ollama —
+    /// exercises the exact code path that broke in the field (connect,
+    /// send, read to EOF, split head/body, parse JSON), just against a
+    /// loopback socket instead of a real `ollama serve`.
+    async fn respond_and_get_probe(response: &'static [u8]) -> OllamaProbeResult {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut req_buf = [0u8; 1024];
+            let _ = sock.read(&mut req_buf).await;
+            sock.write_all(response).await.unwrap();
+            sock.shutdown().await.ok();
+        });
+
+        let result = detect_ollama_models(format!("http://127.0.0.1:{port}"))
+            .await
+            .unwrap();
+        server.await.unwrap();
+        result
+    }
+
+    #[tokio::test]
+    async fn detects_models_from_a_real_response() {
+        let response = b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"models\":[{\"name\":\"llama3.1:8b\"},{\"name\":\"mistral:7b\"}]}";
+        let result = respond_and_get_probe(response).await;
+        assert!(result.reachable);
+        assert_eq!(result.models, vec!["llama3.1:8b", "mistral:7b"]);
+        assert!(result.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn reports_reachable_with_no_models() {
+        let response =
+            b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"models\":[]}";
+        let result = respond_and_get_probe(response).await;
+        assert!(result.reachable);
+        assert!(result.models.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reports_unreachable_when_nothing_is_listening() {
+        // Port 1 is a reserved low port essentially guaranteed to have
+        // nothing bound to it in any test environment.
+        let result = detect_ollama_models("http://127.0.0.1:1".to_string())
+            .await
+            .unwrap();
+        assert!(!result.reachable);
+        assert!(result.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn handles_chunked_transfer_encoding_defensively() {
+        // Chunk size is the hex byte length of the JSON payload below (25 = 0x19) —
+        // verified with Python's len() rather than hand-counted, since a wrong
+        // count here would test nothing (an earlier draft got this wrong and the
+        // resulting failure was a bug in the test data, not in dechunk()).
+        let response = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n19\r\n{\"models\":[{\"name\":\"x\"}]}\r\n0\r\n\r\n";
+        let result = respond_and_get_probe(response).await;
+        assert!(result.reachable);
+        assert_eq!(result.models, vec!["x"]);
+    }
 }

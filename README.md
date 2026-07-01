@@ -140,6 +140,8 @@ From the fleet dashboard, click **"+ Add"** to register and start your first age
 
 Ollama detection runs automatically when the dialog opens and tells you exactly what's wrong if it can't find a usable model — "Ollama isn't running" vs. "Ollama is running but has no models" (with the exact `ollama pull` command to fix it) — with a Retry button once you've acted on it. **The "Add Agent" button stays disabled until at least one real model is confirmed**; it will not register a placeholder agent that can never run a task. If the local agent process fails to start (or crashes right after), the dialog reports the actual failure instead of a generic "should appear online soon."
 
+**Windows note:** Ollama detection runs as a Rust command (`detect_ollama_models`), not a frontend `fetch()`. A real Windows hardware test caught a genuine bug here: the webview's own `fetch()` to `http://localhost:11434` is blocked by Chromium/WebView2's Private Network Access policy even when Ollama is running with models installed, because Ollama's server never sends the `Access-Control-Allow-Private-Network` header that policy requires. Moving the request to a Rust-side socket (which isn't a browser page and isn't subject to that policy) fixed it.
+
 **Option B — build from source (any platform), one command:**
 
 ```bash

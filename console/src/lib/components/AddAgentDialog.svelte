@@ -8,7 +8,13 @@
     1. probe local Ollama for installed models, with clear guidance if it
        isn't running or has none — and refuse to register a placeholder
        agent that can't actually do anything (the previous version silently
-       fell back to a fake "llama3.1:8b" capability and registered anyway)
+       fell back to a fake "llama3.1:8b" capability and registered anyway).
+       Detection runs through the Rust-side `detect_ollama_models` command,
+       not a frontend `fetch()` — a real Windows test run showed the
+       webview's own `fetch()` gets blocked by Chromium's Private Network
+       Access policy even when Ollama is genuinely running, so the actual
+       HTTP call has to happen outside the webview (see that command's doc
+       comment in console/src-tauri/src/lib.rs for the full story)
     2. generate a fresh agent identity (pubkey) — same pattern the Console
        already uses for its own identity (see stores/auth.ts)
     3. POST /v1/agents with the Console's own JWT (valid because gd-0.1
@@ -60,17 +66,56 @@
     return ollamaUrl.trim().replace(/\/$/, '');
   }
 
-  async function detectOllama() {
-    ollamaState = 'checking';
-    ollamaMessage = null;
-    const url = normalizedOllamaUrl();
-    if (!url) {
-      ollamaState = 'error';
-      ollamaMessage = 'Enter an Ollama URL first.';
-      detectedModels = [];
-      return;
-    }
+  interface OllamaProbeResult {
+    reachable: boolean;
+    models: string[];
+    error: string | null;
+  }
 
+  /**
+   * The obvious approach — a plain `fetch()` to Ollama's REST API — does
+   * NOT work reliably from inside the Tauri webview, confirmed on real
+   * Windows hardware with Ollama genuinely running and models installed.
+   * Chromium/WebView2 enforces Private Network Access for a request from
+   * the app's origin into `http://localhost:11434`: it requires an
+   * `Access-Control-Allow-Private-Network: true` response header that
+   * Ollama's server never sends, so the request is silently blocked with a
+   * generic network error indistinguishable from "Ollama isn't running." A
+   * page served by a plain `python -m http.server` (e.g. legacy
+   * Gruper.html) never hits this because it's itself served from
+   * `localhost`, which is why that path "just worked" while this dialog
+   * didn't. The fix is to make the request from Rust instead — see
+   * `detect_ollama_models` in console/src-tauri/src/lib.rs — which talks
+   * raw sockets and isn't a browser page, so none of this applies.
+   */
+  async function detectViaTauri(url: string): Promise<void> {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const result = await invoke<OllamaProbeResult>('detect_ollama_models', { url });
+    detectedModels = result.models ?? [];
+
+    if (!result.reachable) {
+      ollamaState = 'unreachable';
+      ollamaMessage =
+        result.error ?? `Ollama is not running (or not reachable) at ${url}. Start Ollama, then click Retry.`;
+    } else if (detectedModels.length > 0) {
+      ollamaState = 'ready';
+      ollamaMessage = null;
+    } else if (result.error) {
+      ollamaState = 'error';
+      ollamaMessage = result.error;
+    } else {
+      ollamaState = 'no_models';
+      ollamaMessage = `Ollama is running but has no models installed. Run "ollama pull ${SUGGESTED_MODEL}" in a terminal, then click Retry.`;
+    }
+  }
+
+  /**
+   * Only used outside Tauri (e.g. a plain `vite dev` browser tab during UI
+   * work) — a Vite dev server is itself served from `localhost`, so the
+   * Private Network Access restriction that breaks this inside the packaged
+   * app doesn't apply here, same as the legacy Gruper.html case above.
+   */
+  async function detectViaBrowserFetch(url: string): Promise<void> {
     try {
       const res = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(3000) });
       if (!res.ok) {
@@ -98,6 +143,30 @@
       } else {
         ollamaMessage = `Ollama is not running (or not reachable) at ${url}. Start Ollama, then click Retry.`;
       }
+    }
+  }
+
+  async function detectOllama() {
+    ollamaState = 'checking';
+    ollamaMessage = null;
+    const url = normalizedOllamaUrl();
+    if (!url) {
+      ollamaState = 'error';
+      ollamaMessage = 'Enter an Ollama URL first.';
+      detectedModels = [];
+      return;
+    }
+
+    if (hasTauri) {
+      try {
+        await detectViaTauri(url);
+      } catch (err) {
+        detectedModels = [];
+        ollamaState = 'error';
+        ollamaMessage = `Could not run Ollama detection: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    } else {
+      await detectViaBrowserFetch(url);
     }
   }
 
