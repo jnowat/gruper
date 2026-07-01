@@ -125,16 +125,18 @@ A companion system that extends Gruper Core across multiple machines and multipl
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
 | `orchestrator/` | ✅ Running, packaged | FastAPI, JWT auth (auto-generated on first run), task dispatch + result relay, console WS; **SQLite by default, PostgreSQL opt-in for the server tier (WP-30)**; self-contained executable via PyInstaller (WP-31) |
 | `agent-runtime/` | ✅ Code complete, packaged | Outbound WSS client, Ollama, offline queue, circuit breaker; dispatch contract validated in WP-06; self-contained executable via PyInstaller (WP-31) |
-| `console/` | ✅ Scaffold complete, auto-connect | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; **auto-starts and auto-connects to a local orchestrator sidecar with zero manual steps (WP-32)** |
+| `console/` | ✅ Scaffold complete, auto-connect, agent onboarding | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; **auto-starts and auto-connects to a local orchestrator sidecar with zero manual steps (WP-32)**; **"+ Add Local Agent" registers a fresh agent identity, probes local Ollama for models, and spawns it as a second sidecar — no config files, no manual JWT copy-paste, single-machine scope** |
 | end-to-end relay | ✅ Automated E2E green | `tests/e2e/` drives the real relay 17/17 on both SQLite and PostgreSQL; real-NAT field run pending ([WP-06 report](docs/WP-06-Validation.md)) |
 
-**⚠️ Honest caveat:** WP-31/WP-32 above were built and verified on **Linux only** — no Windows hardware was available during that work. A Windows CI build job was added and Windows-specific code paths were written carefully, but neither has been run and confirmed on a real Windows machine yet. See [ROADMAP.md](ROADMAP.md) for the specifics.
+**⚠️ Honest caveat:** WP-31/WP-32 above were built and verified on **Linux only**. The Windows CI build job (`build-windows.yml`) **has succeeded repeatedly** — 18 green runs as of this writing, including on `main` — so the `.exe`/`.msi` installers it produces do build and bundle correctly. What's still unverified is a human actually downloading one of those installers and running it on **physical Windows hardware**: the sidecar auto-run path, the SQLite/JWT-secret file locations, and the orphan-detection watchdog have only been exercised on Linux. See [ROADMAP.md](ROADMAP.md) for the specifics.
 
 ### Desktop quick start (no Docker, no PostgreSQL, no manual Python)
 
 This is the primary way to run the full stack (Console + Orchestrator + Agent) locally. Docker + PostgreSQL remain available as an **advanced / server** option — see [Server deployment](#server-deployment-docker--postgresql-advanced) below.
 
 **Option A — Windows installer (recommended for most users):** download the latest Console installer from the [Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml) workflow's Artifacts (see [Downloads](#downloads) below). Install and launch it — the Console bundles the orchestrator as a background process and starts it automatically on launch; you land straight on the fleet dashboard with no separate orchestrator step and no manual configuration. Ollama is the one remaining external prerequisite (see [Quick Start](#quick-start) above).
+
+From the fleet dashboard, click **"+ Add"** to register and start your first agent — the Console generates its identity, probes `localhost:11434` for installed Ollama models, registers it with the local orchestrator, and launches it as a background process, all in one dialog. This closes what used to be the biggest gap in the desktop experience: previously there was no way to get from "Console installed" to "a task actually runs" without hand-editing `agent-runtime/.env` and copy-pasting a JWT from a `curl` command.
 
 **Option B — build from source (any platform), one command:**
 
@@ -259,9 +261,11 @@ The `.exe` (NSIS) and `.msi` (WiX) installers are built on **GitHub Actions'
 Windows runner** — native Windows MSVC binaries cannot be cross-compiled from
 Linux or macOS, so the installers come from CI rather than a local build. The
 same is true of the orchestrator/agent `.exe`s (PyInstaller does not cross-compile
-either). **Honest caveat:** this Windows CI job was written and reviewed carefully
-but has not yet been watched succeed and downloaded/run on a real Windows machine
-as part of the WP-31/WP-32 work — see [ROADMAP.md](ROADMAP.md) for specifics.
+either). **Honest caveat:** this Windows CI job has succeeded 18 times to date
+(including on `main`), so the build itself is proven — what has **not** yet
+happened is a human downloading one of those artifacts and running it on a real
+Windows machine as part of the WP-31/WP-32 work — see [ROADMAP.md](ROADMAP.md)
+for specifics.
 
 > **Status:** The console scaffold builds end-to-end. Both the frontend
 > (`npm ci && npm run build && npm run check`) **and** the Tauri Rust shell
@@ -269,9 +273,9 @@ as part of the WP-31/WP-32 work — see [ROADMAP.md](ROADMAP.md) for specifics.
 > asset validation) compile green on Linux. The Tauri v2 library-naming bug that
 > previously broke the Windows compile — `gruper_console_lib` unresolved, because
 > `Cargo.toml` had no explicit `[lib]` section — is fixed, and the bundle icons are
-> now valid RGBA. GitHub registers the workflow from the default branch, so the
-> first downloadable `.exe` / `.msi` appear on the first Windows run after this
-> reaches `main`; subsequent `main` builds and `v*` tags produce them on every run.
+> now valid RGBA. The workflow has since run green on `main` multiple times, so
+> downloadable `.exe` / `.msi` artifacts are available from any successful
+> `main` run or `v*` tag today — not just a future one.
 
 | Platform | Format | Status |
 |----------|--------|--------|
@@ -293,6 +297,15 @@ certificate before v1.0.
 
 **Console dev loop** (hot-reload against source, rather than a packaged sidecar):
 
+> ⚠️ **Mandatory first step — do this before `cargo build` or `npx tauri dev`, not just for auto-connect.** `console/src-tauri/tauri.conf.json` declares `gruper-orchestrator` and `gruper-agent` as `bundle.externalBin` sidecars. Tauri's build script checks that a matching staged binary exists for your host triple **even for a plain debug build** — with nothing staged, `cargo build`/`cargo check`/`npx tauri dev` all hard-fail with `resource path "binaries/gruper-orchestrator-<your-triple>" doesn't exist` before any of your own code even compiles. This is not optional, and it is not documented anywhere else as clearly as this: run the staging step once (below) any time you `git clone` fresh or wipe `console/src-tauri/binaries/`.
+
+```bash
+./scripts/build-desktop.sh          # macOS/Linux — from the repo root
+# .\scripts\build-desktop.ps1       # Windows PowerShell
+```
+
+This builds the orchestrator and agent as PyInstaller executables and copies both into `console/src-tauri/binaries/` under your platform's host triple — the one-time step the warning above requires. Do this once per clone (or whenever you delete `console/src-tauri/binaries/`), then the normal dev loop:
+
 ```bash
 cd console
 npm install          # package-lock.json is committed; this restores the exact tree
@@ -301,7 +314,7 @@ npm run dev          # starts Vite dev server on :5173
 npx tauri dev        # launches the desktop app against the running dev server
 ```
 
-For this to auto-connect like a packaged build, first stage a sidecar binary once with `../scripts/build-desktop.sh` (or run the orchestrator separately with `cd orchestrator && uvicorn main:app --port 8080` and let the Console detect it as an already-running orchestrator instead).
+To get auto-connect behavior like a packaged build, the staged orchestrator sidecar from the step above is enough — the Console will spawn it itself. Alternatively, run the orchestrator separately (`uvicorn orchestrator.main:app --port 8080` from the repo root — see [orchestrator/README.md](orchestrator/README.md)) and let the Console detect it as an already-running orchestrator instead.
 
 Issues and pull requests: [github.com/jnowat/gruper/issues](https://github.com/jnowat/gruper/issues)
 

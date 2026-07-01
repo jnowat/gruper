@@ -11,6 +11,7 @@
   import { OrchestratorClient } from '$lib/api/client.js';
   import { ConsoleWS } from '$lib/ws/console_ws.js';
   import ConnectDialog from '$lib/components/ConnectDialog.svelte';
+  import AddAgentDialog from '$lib/components/AddAgentDialog.svelte';
   import AgentCard from '$lib/components/AgentCard.svelte';
   import TaskComposer from '$lib/components/TaskComposer.svelte';
   import ResultView from '$lib/components/ResultView.svelte';
@@ -21,6 +22,7 @@
   let activeTaskId = $state<string | null>(null);
   let rightTab = $state<'compose' | 'analytics'>('compose');
   let loadingData = $state(false);
+  let showAddAgent = $state(false);
 
   const auth = $derived($authStore);
   const agents = $derived($fleetStore);
@@ -103,9 +105,18 @@
       <aside class="w-56 flex-shrink-0 border-r border-white/5 flex flex-col overflow-hidden">
         <div class="px-3 py-2 flex items-center justify-between">
           <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Fleet</span>
-          {#if loadingData}
-            <span class="text-xs text-blue-400 progress-pulse">loading…</span>
-          {/if}
+          <div class="flex items-center gap-2">
+            {#if loadingData}
+              <span class="text-xs text-blue-400 progress-pulse">loading…</span>
+            {/if}
+            <button
+              onclick={() => { showAddAgent = true; }}
+              class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              title="Add Local Agent"
+            >
+              + Add
+            </button>
+          </div>
         </div>
 
         <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
@@ -118,7 +129,7 @@
           {/each}
           {#if agents.length === 0 && !loadingData}
             <p class="text-xs text-slate-600 text-center py-4">
-              No agents registered.<br />Register one with POST /v1/agents.
+              No agents registered.<br />Click "+ Add" above to start one.
             </p>
           {/if}
         </div>
@@ -189,4 +200,8 @@
 
     </div>
   </div>
+
+  {#if showAddAgent}
+    <AddAgentDialog onclose={() => { showAddAgent = false; }} />
+  {/if}
 {/if}

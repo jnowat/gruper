@@ -12,6 +12,18 @@ function createFleetStore() {
       store.set(agents);
     },
 
+    /**
+     * Add a freshly-registered agent (e.g. via "Add Local Agent") so it
+     * appears in the fleet immediately, rather than waiting for the next
+     * full REST reload. Its first fleet_event (on WS register) then updates
+     * it in place via applyEvent.
+     */
+    add(agent: Agent) {
+      store.update((agents) =>
+        agents.some((a) => a.id === agent.id) ? agents : [agent, ...agents],
+      );
+    },
+
     /** Apply a real-time fleet_event from the console WS. */
     applyEvent(event: FleetEvent) {
       store.update((agents) => {

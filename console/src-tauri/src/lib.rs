@@ -21,7 +21,20 @@
 //! `tauri-plugin-single-instance` is registered first so a second Console
 //! launch focuses the existing window instead of spawning a second sidecar
 //! and racing for the same port.
+//!
+//! The sidecar (and, since the "Add Local Agent" flow, each spawned
+//! `gruper-agent` sidecar too) is launched with an explicit `.current_dir()`
+//! pointed at the Tauri app-data directory rather than whatever the OS
+//! happened to set as the process's working directory. This matters because
+//! the orchestrator/agent write relative-path state next to their CWD
+//! (`orchestrator.db`, `.gruper_jwt_secret`, `agent.db` — see
+//! orchestrator/config.py and agent-runtime/config.py) and a Windows
+//! installer launch's CWD is commonly `C:\Program Files\...`, which is not
+//! writable by a non-admin user — an unhandled write failure there is a
+//! real crash risk, not a hypothetical one.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -34,11 +47,31 @@ const ORCHESTRATOR_PORT: u16 = 8080;
 const ORCHESTRATOR_URL: &str = "http://127.0.0.1:8080";
 const HEALTH_POLL_TIMEOUT_S: u64 = 15;
 
-/// Holds the sidecar child process IF this Console instance spawned one, so
-/// it can be killed on exit. `None` if we connected to an already-running
-/// orchestrator instead — in that case, exiting the Console must NOT kill it
-/// (it isn't ours to kill: some other launch, or a manually-run server tier).
-struct SidecarState(Mutex<Option<CommandChild>>);
+/// Holds every sidecar child process this Console instance spawned, so they
+/// can all be killed on exit. `orchestrator` is `None` if we connected to an
+/// already-running orchestrator instead of spawning one — in that case,
+/// exiting the Console must NOT kill it (it isn't ours to kill: some other
+/// launch, or a manually-run server tier). `agents` holds one entry per
+/// locally-spawned agent sidecar, keyed by agent id (see spawn_local_agent).
+struct SidecarState {
+    orchestrator: Mutex<Option<CommandChild>>,
+    agents: Mutex<HashMap<String, CommandChild>>,
+}
+
+/// Resolves (and creates, if missing) the directory the Console's spawned
+/// sidecars should use as their working directory, so their relative-path
+/// state (SQLite files, JWT secret, offline queues) lands somewhere the
+/// current user can always write to, regardless of how the Console itself
+/// was launched or where it was installed.
+fn resolve_sidecar_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("could not resolve app data directory: {e}"))?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create app data directory {}: {e}", dir.display()))?;
+    Ok(dir)
+}
 
 /// The last `orchestrator-status` payload emitted, so a frontend that
 /// attaches its `listen()` call AFTER the event already fired can still
@@ -70,11 +103,17 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .manage(SidecarState(Mutex::new(None)))
+        .manage(SidecarState {
+            orchestrator: Mutex::new(None),
+            agents: Mutex::new(HashMap::new()),
+        })
         .manage(LastStatus(Mutex::new(
             serde_json::json!({ "status": "checking", "url": null, "error": null }),
         )))
-        .invoke_handler(tauri::generate_handler![get_orchestrator_status])
+        .invoke_handler(tauri::generate_handler![
+            get_orchestrator_status,
+            spawn_local_agent
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -105,22 +144,26 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
         ) {
             if let Some(state) = app_handle.try_state::<SidecarState>() {
-                if let Some(child) = state.0.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
+                kill_all_sidecars(&state);
             }
         }
     });
 }
 
-fn kill_sidecar_if_owned<R: tauri::Runtime>(manager: &impl Manager<R>) {
-    let child = manager.state::<SidecarState>().0.lock().unwrap().take();
-    if let Some(child) = child {
-        // Best-effort: the process may have already exited on its own. A
-        // desktop orchestrator we spawned should not outlive the Console
-        // window/app that owns it.
+fn kill_all_sidecars(state: &SidecarState) {
+    if let Some(child) = state.orchestrator.lock().unwrap().take() {
         let _ = child.kill();
     }
+    for (_, child) in state.agents.lock().unwrap().drain() {
+        let _ = child.kill();
+    }
+}
+
+fn kill_sidecar_if_owned<R: tauri::Runtime>(manager: &impl Manager<R>) {
+    // Best-effort: processes may have already exited on their own. A desktop
+    // orchestrator/agent we spawned should not outlive the Console
+    // window/app that owns it.
+    kill_all_sidecars(&manager.state::<SidecarState>());
 }
 
 async fn manage_orchestrator(app: AppHandle) {
@@ -131,6 +174,21 @@ async fn manage_orchestrator(app: AppHandle) {
         );
         return;
     }
+
+    let data_dir = match resolve_sidecar_data_dir(&app) {
+        Ok(dir) => dir,
+        Err(e) => {
+            emit_status(
+                &app,
+                serde_json::json!({
+                    "status": "failed",
+                    "url": null,
+                    "error": format!("could not prepare a writable directory for the local orchestrator: {e}"),
+                }),
+            );
+            return;
+        }
+    };
 
     let sidecar = match app.shell().sidecar("gruper-orchestrator") {
         Ok(cmd) => cmd,
@@ -150,7 +208,14 @@ async fn manage_orchestrator(app: AppHandle) {
     // terminate if it's re-parented (i.e. this Console process is gone by
     // any means, including a forceful kill that no cleanup code here could
     // ever observe).
-    let sidecar = sidecar.env("GRUPER_EXIT_WITH_PARENT", "1");
+    let sidecar = sidecar
+        .env("GRUPER_EXIT_WITH_PARENT", "1")
+        // See the module docstring: the orchestrator persists orchestrator.db
+        // and .gruper_jwt_secret relative to its CWD, which must be a
+        // directory this user can actually write to — not whatever CWD the
+        // OS handed the Console (Program Files on a Windows installer
+        // launch, for example).
+        .current_dir(&data_dir);
 
     let (mut rx, child) = match sidecar.spawn() {
         Ok(pair) => pair,
@@ -168,7 +233,7 @@ async fn manage_orchestrator(app: AppHandle) {
     };
 
     if let Some(state) = app.try_state::<SidecarState>() {
-        *state.0.lock().unwrap() = Some(child);
+        *state.orchestrator.lock().unwrap() = Some(child);
     }
 
     // Drain the sidecar's stdout/stderr into the Console's own log — the
@@ -217,6 +282,94 @@ async fn manage_orchestrator(app: AppHandle) {
             },
         }),
     );
+}
+
+/// "Add Local Agent" (minimum viable agent onboarding): the frontend has
+/// already generated an agent identity and registered it with the
+/// orchestrator via `POST /v1/agents` (see AddAgentDialog.svelte) — this
+/// command does the other half, spawning the bundled `gruper-agent` sidecar
+/// so the newly-registered agent actually comes online and can run tasks,
+/// without the user ever touching a config file or a terminal.
+///
+/// `orchestrator_url` is the same http(s) URL the Console itself is
+/// connected to; it's converted to the agent's expected ws(s) endpoint here
+/// so the frontend doesn't need to know that detail. The JWT is the
+/// console's own token — valid for this because gd-0.1's tokens are
+/// per-owner, not per-agent (see orchestrator/ws/agent_ws.py), and the
+/// spawned agent is owned by the same user as the Console that spawned it,
+/// which matches this feature's explicit single-machine/single-owner scope.
+#[tauri::command]
+async fn spawn_local_agent(
+    app: AppHandle,
+    agent_id: String,
+    jwt_token: String,
+    orchestrator_url: String,
+    ollama_url: Option<String>,
+) -> Result<(), String> {
+    let data_dir = resolve_sidecar_data_dir(&app)?;
+    // Each local agent gets its own working directory so their SQLite offline
+    // queues (agent.db, see agent-runtime/config.py) don't collide.
+    let agent_dir = data_dir.join("agents").join(&agent_id);
+    std::fs::create_dir_all(&agent_dir)
+        .map_err(|e| format!("could not create agent data directory {}: {e}", agent_dir.display()))?;
+
+    let ws_url = orchestrator_url
+        .replacen("https://", "wss://", 1)
+        .replacen("http://", "ws://", 1);
+    let ws_url = format!("{}/v1/agents/ws", ws_url.trim_end_matches('/'));
+
+    let sidecar = app
+        .shell()
+        .sidecar("gruper-agent")
+        .map_err(|e| format!("agent sidecar binary not available: {e}"))?
+        .env("AGENT_ID", &agent_id)
+        .env("JWT_TOKEN", &jwt_token)
+        .env("ORCHESTRATOR_URL", &ws_url)
+        // See agent-runtime/main.py: mirrors the orchestrator sidecar's
+        // orphan watchdog so a forcefully-killed Console doesn't leave this
+        // process running forever.
+        .env("GRUPER_EXIT_WITH_PARENT", "1")
+        .current_dir(&agent_dir);
+    let sidecar = if let Some(url) = ollama_url {
+        sidecar.env("OLLAMA_URL", url)
+    } else {
+        sidecar
+    };
+
+    let (mut rx, child) = sidecar
+        .spawn()
+        .map_err(|e| format!("failed to start local agent {agent_id}: {e}"))?;
+
+    if let Some(state) = app.try_state::<SidecarState>() {
+        state
+            .agents
+            .lock()
+            .unwrap()
+            .insert(agent_id.clone(), child);
+    }
+
+    // Drain stdout/stderr into the Console's own log, same as the
+    // orchestrator sidecar — invaluable for diagnosing why a freshly-added
+    // agent never shows up as online.
+    tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
+                    eprintln!("[agent:{agent_id}] {}", String::from_utf8_lossy(&line));
+                }
+                CommandEvent::Error(err) => {
+                    eprintln!("[agent:{agent_id}] error: {err}");
+                }
+                CommandEvent::Terminated(payload) => {
+                    eprintln!("[agent:{agent_id}] exited: {:?}", payload);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+
+    Ok(())
 }
 
 /// Hand-rolled HTTP/1.0 GET over a raw TCP socket rather than pulling in an

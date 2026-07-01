@@ -19,13 +19,22 @@ function _base64UrlEncode(bytes: Uint8Array): string {
 }
 
 /**
+ * gd-0.1's /v1/auth/token and POST /v1/agents stub out real ed25519 signature
+ * verification and accept any syntactically valid pubkey (see
+ * orchestrator/routers/auth.py, orchestrator/routers/agents.py), so a random
+ * 32-byte value serves as a stable identity just as well. Shared by the
+ * console's own identity (getOrCreatePubkey) and by "Add Local Agent"
+ * (AddAgentDialog.svelte), which needs a fresh one per agent.
+ */
+export function generateRandomPubkey(): string {
+  return _base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+/**
  * WP-32: a desktop user should never have to run a Python one-liner to get a
- * pubkey before they can connect. gd-0.1's /v1/auth/token stubs out real
- * ed25519 signature verification and find-or-creates a user by pubkey alone
- * (see orchestrator/routers/auth.py), so a random 32-byte value serves as a
- * stable client identity just as well — it's generated once and persisted
- * separately from the auth token/session so logging out doesn't spawn a new
- * orchestrator-side user on the next login.
+ * pubkey before they can connect. A random identity is generated once and
+ * persisted separately from the auth token/session so logging out doesn't
+ * spawn a new orchestrator-side user on the next login.
  */
 export function getOrCreatePubkey(): string {
   try {
@@ -37,7 +46,7 @@ export function getOrCreatePubkey(): string {
   } catch {
     // Fall through and generate a fresh one.
   }
-  const pubkey = _base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  const pubkey = generateRandomPubkey();
   try {
     localStorage.setItem(_IDENTITY_KEY, JSON.stringify({ pubkey }));
   } catch {
