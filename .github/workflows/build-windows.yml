@@ -15,16 +15,20 @@ name: Build Windows Installer
 #   WP-31/WP-32 (desktop-first packaging): this job also builds standalone
 #   Windows executables for the orchestrator and agent runtime (PyInstaller —
 #   no Python install needed on the machine that runs them) and uploads them
-#   as their own artifacts, independent of console readiness. The orchestrator
-#   executable is additionally copied into console/src-tauri/binaries/ so the
-#   Tauri build below bundles it as a sidecar (see tauri.conf.json's
-#   `bundle.externalBin`) — the Console can spawn it automatically on launch.
-#   This is the only way to produce a real Windows .exe without Windows
-#   hardware: PyInstaller does not cross-compile, so these steps must run ON
-#   a Windows runner, same as the existing Tauri build below. Built and
-#   validated on Linux during development (see ROADMAP.md WP-31 notes); not
-#   personally verified on real Windows hardware — this CI run is the first
-#   time these exact steps execute on Windows.
+#   as their own artifacts, independent of console readiness. BOTH
+#   executables are additionally copied into console/src-tauri/binaries/ so
+#   the Tauri build below bundles them as sidecars (see tauri.conf.json's
+#   `bundle.externalBin: ["binaries/gruper-orchestrator", "binaries/gruper-agent"]`)
+#   — the Console can spawn the orchestrator automatically on launch (WP-32)
+#   and spawn an agent on demand via "Add Local Agent" (WP-32.1). Tauri
+#   hard-fails the whole build if ANY declared externalBin entry has no
+#   matching staged file for the target triple, even for a plain debug
+#   build — a "Verify sidecar binaries are staged" step checks this
+#   explicitly right after staging, so a missing sidecar fails fast with a
+#   clear message instead of a cryptic error deep inside tauri-action.
+#   This is the only way to produce real Windows .exe sidecars without
+#   Windows hardware: PyInstaller does not cross-compile, so these steps
+#   must run ON a Windows runner, same as the Tauri build itself.
 #
 # Triggers:
 #   push to main        → artifact upload only
@@ -119,16 +123,55 @@ jobs:
           pyinstaller agent-runtime/packaging/gruper-agent.spec --distpath dist --workpath build --noconfirm
           ls -la dist/
 
-      - name: Stage orchestrator executable as a Tauri sidecar binary
-        # Only meaningful once the console project exists to bundle it into.
-        # Tauri's sidecar convention requires the binary be named
-        # <name>-<target-triple>.exe, matching the externalBin entry in
-        # tauri.conf.json (bundle.externalBin: ["binaries/gruper-orchestrator"]).
+      - name: Stage orchestrator + agent executables as Tauri sidecar binaries
+        # Only meaningful once the console project exists to bundle them into.
+        # Tauri's sidecar convention requires each binary be named
+        # <name>-<target-triple>.exe, matching BOTH externalBin entries in
+        # tauri.conf.json (bundle.externalBin: ["binaries/gruper-orchestrator",
+        # "binaries/gruper-agent"]) — Tauri hard-fails the build if either
+        # staged file is missing, even for a plain debug build. A prior
+        # revision of this workflow only staged the orchestrator; adding the
+        # agent as a second sidecar (for the Console's "Add Local Agent"
+        # flow) without updating this step broke the Windows build with
+        # `resource path "binaries/gruper-agent-x86_64-pc-windows-msvc.exe"
+        # doesn't exist` — confirmed by a real failed CI run, not
+        # hypothetical. Both binaries are staged here, together, so that
+        # class of drift can't happen again silently.
         if: ${{ steps.readiness.outputs.ready == 'true' }}
         shell: bash
         run: |
           mkdir -p console/src-tauri/binaries
           cp dist/gruper-orchestrator.exe console/src-tauri/binaries/gruper-orchestrator-x86_64-pc-windows-msvc.exe
+          cp dist/gruper-agent.exe console/src-tauri/binaries/gruper-agent-x86_64-pc-windows-msvc.exe
+
+      - name: Verify sidecar binaries are staged
+        # Fail fast with a clear message here rather than letting a missing
+        # sidecar surface as a cryptic "resource path ... doesn't exist"
+        # error deep inside tauri-action's bundling step. Checks every
+        # externalBin entry declared in tauri.conf.json against what's
+        # actually on disk, so this step catches a THIRD sidecar being added
+        # the same way the agent was, not just today's two.
+        if: ${{ steps.readiness.outputs.ready == 'true' }}
+        shell: python
+        run: |
+          import json, pathlib, sys
+
+          conf = json.loads(pathlib.Path("console/src-tauri/tauri.conf.json").read_text())
+          external_bins = conf.get("bundle", {}).get("externalBin", [])
+          triple = "x86_64-pc-windows-msvc"
+          missing = []
+          for entry in external_bins:
+              # entry looks like "binaries/gruper-orchestrator" — Tauri appends
+              # "-<triple>.exe" itself on Windows.
+              expected = pathlib.Path("console/src-tauri") / f"{entry}-{triple}.exe"
+              status = "OK" if expected.is_file() else "MISSING"
+              print(f"  [{status}] {expected}")
+              if status == "MISSING":
+                  missing.append(str(expected))
+          if missing:
+              print(f"\n::error::{len(missing)} sidecar binary(ies) not staged before the Tauri build: {missing}")
+              sys.exit(1)
+          print(f"\nAll {len(external_bins)} declared sidecar(s) staged for {triple}.")
 
       - name: Upload orchestrator executable
         uses: actions/upload-artifact@v4
@@ -320,6 +363,8 @@ jobs:
             ls -la console/src-tauri/ || echo "(not found)"
             echo "=== console/src-tauri/icons/ ==="
             ls -la console/src-tauri/icons/ || echo "(not found)"
+            echo "=== console/src-tauri/binaries/ (staged sidecars) ==="
+            ls -la console/src-tauri/binaries/ || echo "(not found — sidecar staging step never ran or failed)"
             echo "=== Rust toolchain ==="
             rustc --version || true
             cargo --version || true
@@ -403,7 +448,7 @@ jobs:
                   "",
                   "| Artifact | Format | Notes |",
                   "|----------|--------|-------|",
-                  "| `*-setup.exe` | NSIS installer | Bundles the orchestrator as a sidecar (WP-32) — launching the Console starts a local orchestrator automatically |",
+                  "| `*-setup.exe` | NSIS installer | Bundles the orchestrator as a sidecar (WP-32) — launching the Console starts a local orchestrator automatically. Also bundles the agent runtime as a second sidecar (WP-32.1), spawned on demand via the Console's \"Add Local Agent\" flow |",
                   "| `*.msi` | WiX MSI | Enterprise / Group Policy compatible |",
                   "",
                   "Artifacts attached to this run (30-day retention).",
