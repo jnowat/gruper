@@ -196,7 +196,8 @@ class AgentWSClient:
 
         try:
             parts: list[str] = []
-            async for chunk in self._ollama.chat(messages, model=model, options=options):
+            stats: dict = {}
+            async for chunk in self._ollama.chat(messages, model=model, options=options, stats=stats):
                 parts.append(chunk)
                 await self._send({
                     "type": "progress",
@@ -206,16 +207,29 @@ class AgentWSClient:
                     "tokens_so_far": len(parts),
                 })
 
+            duration_ms = int((time.monotonic() - started) * 1000)
+            # Prefer Ollama's real counts (eval_count = generated tokens) over the
+            # streamed-chunk count; compute tokens/sec from generation time only
+            # (eval_duration, nanoseconds) so it reflects decode speed, not queue
+            # or prompt-eval time. Fall back gracefully when the stats are absent.
+            eval_count = stats.get("eval_count")
+            eval_duration_ns = stats.get("eval_duration")
+            result: dict = {
+                "output": "".join(parts),
+                "model_used": model,
+                "duration_ms": duration_ms,
+                "tokens_used": eval_count if eval_count is not None else len(parts),
+            }
+            if eval_count and eval_duration_ns:
+                result["tokens_per_sec"] = round(eval_count / (eval_duration_ns / 1e9), 1)
+            if stats.get("prompt_eval_count") is not None:
+                result["prompt_tokens"] = stats["prompt_eval_count"]
+
             await self._send({
                 "type": "result",
                 "task_id": task_id,
                 "status": "complete",
-                "result": {
-                    "output": "".join(parts),
-                    "model_used": model,
-                    "duration_ms": int((time.monotonic() - started) * 1000),
-                    "tokens_used": len(parts),
-                },
+                "result": result,
             })
             await self._cb.record_success()
             if from_queue:

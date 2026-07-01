@@ -123,10 +123,12 @@
 
   function exportJsonl() {
     download(`gruper-logs-${stamp()}.jsonl`, filtered.map((e) => JSON.stringify(e)).join('\n'), 'application/x-ndjson');
+    flash('export');
   }
 
   function exportTxt() {
     download(`gruper-logs-${stamp()}.txt`, toText(filtered), 'text/plain');
+    flash('export');
   }
 
   function diagnosticsText(): string {
@@ -190,6 +192,7 @@
       </button>
       <button onclick={exportJsonl} class="text-xs px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10">.jsonl</button>
       <button onclick={exportTxt} class="text-xs px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10">.txt</button>
+      {#if copied === 'export'}<span class="text-xs text-emerald-400 self-center">Saved ✓</span>{/if}
       <button onclick={() => logStore.clear()} class="text-xs px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-400 hover:text-red-400 hover:bg-white/10">Clear</button>
       <button onclick={onclose} class="text-slate-400 hover:text-slate-200 text-sm px-1" aria-label="Close">✕</button>
     </div>

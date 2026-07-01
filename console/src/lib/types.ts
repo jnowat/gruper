@@ -90,7 +90,14 @@ export interface Task {
   timeout_s: number;
   retry_count: number;
   correlation_id: string | null;
-  result: { output?: string; model_used?: string; tokens_used?: number; duration_ms?: number } | null;
+  result: {
+    output?: string;
+    model_used?: string;
+    tokens_used?: number;
+    tokens_per_sec?: number;
+    prompt_tokens?: number;
+    duration_ms?: number;
+  } | null;
   error: { code?: string; message?: string } | null;
   created_at: string;
   dispatched_at: string | null;

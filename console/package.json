@@ -26,8 +26,10 @@
   "dependencies": {
     "@tauri-apps/api": "^2.3.0",
     "@tauri-apps/plugin-store": "^2.2.0",
+    "@types/katex": "^0.16.8",
     "chart.js": "^4.5.1",
     "dompurify": "^3.4.11",
+    "katex": "^0.17.0",
     "marked": "^14.1.4"
   }
 }

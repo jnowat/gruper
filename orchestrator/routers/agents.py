@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..database import append_event
 from ..db import Database, Row
-from ..db.util import new_id, now_iso, ts_or_none
+from ..db.util import is_valid_uuid, new_id, now_iso, ts_or_none
 from ..security import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -142,6 +142,53 @@ async def list_agents(
         user_id,
     )
     return [_row_to_response(r) for r in rows]
+
+
+class AgentUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+
+
+@router.patch(
+    "/{agent_id}",
+    response_model=AgentResponse,
+    summary="Rename an agent (owner only)",
+)
+async def update_agent(
+    agent_id: str,
+    body: AgentUpdateRequest,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+) -> AgentResponse:
+    """Rename an agent so a fleet isn't a wall of indistinguishable names.
+
+    Owner-scoped: the UPDATE matches on both id and owner_id, so a non-owner
+    (or a bad id) gets an indistinguishable 404 rather than confirming the
+    agent exists. Only the display name is mutable here.
+    """
+    if not is_valid_uuid(agent_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
+    pool: Database = request.app.state.pool
+    row = await pool.fetchrow(
+        f"""
+        UPDATE agents SET name = $1
+        WHERE id = $2::uuid AND owner_id = $3
+        RETURNING {_SELECT_COLS}
+        """,
+        body.name,
+        agent_id,
+        user_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
+    await append_event(
+        pool,
+        actor_id=user_id,
+        action="agent.updated",
+        subject_id=agent_id,
+        metadata={"name": body.name},
+    )
+    logger.info("Agent %s renamed to %r (owner=%s)", agent_id, body.name, user_id)
+    return _row_to_response(row)
 
 
 def _row_to_response(row: Row) -> AgentResponse:

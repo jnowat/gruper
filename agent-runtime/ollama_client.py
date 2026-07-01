@@ -38,16 +38,32 @@ class OllamaClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_s
 
+    # Fields on Ollama's final (done) chunk we surface for accurate metrics.
+    # eval_count = output tokens generated; eval_duration = generation time in
+    # nanoseconds; prompt_eval_count = input tokens. These are the real counts,
+    # not the streamed-chunk count we previously reported as "tokens".
+    _STAT_FIELDS = (
+        "eval_count",
+        "eval_duration",
+        "prompt_eval_count",
+        "prompt_eval_duration",
+        "total_duration",
+    )
+
     async def chat(
         self,
         messages: list[dict],
         model: str,
         options: dict | None = None,
+        stats: dict | None = None,
     ) -> AsyncIterator[str]:
         """
         Stream /api/chat response chunks.
 
-        Yields individual content strings as they arrive from Ollama.
+        Yields individual content strings as they arrive from Ollama. If a
+        mutable `stats` dict is passed, it is populated from Ollama's final
+        "done" chunk with real token/timing counts (eval_count etc.) — pass a
+        fresh dict per call, since one client instance serves concurrent tasks.
         Raises httpx.HTTPStatusError on non-2xx responses.
         """
         payload = {
@@ -72,6 +88,10 @@ class OllamaClient:
                     if content:
                         yield content
                     if chunk.get("done"):
+                        if stats is not None:
+                            for k in self._STAT_FIELDS:
+                                if chunk.get(k) is not None:
+                                    stats[k] = chunk[k]
                         break
 
     async def list_models(self) -> list[str]:

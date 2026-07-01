@@ -43,6 +43,13 @@ export class OrchestratorClient {
     });
   }
 
+  renameAgent(id: string, name: string): Promise<Agent> {
+    return this._fetch<Agent>(`/v1/agents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    });
+  }
+
   listTasks(): Promise<Task[]> {
     return this._fetch<Task[]>('/v1/tasks');
   }

@@ -44,9 +44,17 @@
   const SUGGESTED_MODEL = 'llama3.1';
   const AGENT_ONLINE_TIMEOUT_MS = 20_000;
 
-  let name = $state('Local Agent');
+  let name = $state('');
+  let nameEdited = $state(false);
   let ollamaUrl = $state('http://localhost:11434');
   let role = $state('analyst');
+
+  // A friendly model label for naming: drop the ":tag" and registry path, so
+  // "gemma3:4b" → "gemma3", "library/llama3.1:8b" → "llama3.1".
+  function prettyModel(m: string): string {
+    const base = m.split(':')[0];
+    return base.includes('/') ? base.slice(base.lastIndexOf('/') + 1) : base;
+  }
 
   type Step = 'form' | 'registering' | 'spawning' | 'waiting' | 'done';
   let step = $state<Step>('form');
@@ -67,6 +75,15 @@
     } else if (!detectedModels.includes(defaultModel)) {
       defaultModel = detectedModels[0];
     }
+  });
+
+  // Suggest a distinguishable name (model · role) so a fleet of agents isn't a
+  // wall of "Local Agent". Auto-fills the Name field until the user edits it.
+  const suggestedName = $derived(
+    defaultModel ? `${prettyModel(defaultModel)} · ${role}` : `${role} agent`,
+  );
+  $effect(() => {
+    if (!nameEdited) name = suggestedName;
   });
 
   let error = $state<string | null>(null);
@@ -330,9 +347,9 @@
     let agent: Agent;
     try {
       step = 'registering';
-      logStore.frontend('info', 'ui', `registering agent "${name.trim() || 'Local Agent'}" (default model ${capabilities.default_model})`);
+      logStore.frontend('info', 'ui', `registering agent "${name.trim() || suggestedName}" (default model ${capabilities.default_model})`);
       agent = await client.registerAgent({
-        name: name.trim() || 'Local Agent',
+        name: name.trim() || suggestedName,
         pubkey: generateRandomPubkey(),
         capabilities,
         runtime_version: RUNTIME_VERSION,
@@ -428,16 +445,6 @@
       </p>
 
       <div>
-        <label class="block text-xs text-slate-400 mb-1" for="agent-name">Name</label>
-        <input
-          id="agent-name"
-          type="text"
-          bind:value={name}
-          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        />
-      </div>
-
-      <div>
         <label class="block text-xs text-slate-400 mb-1" for="ollama-url">Ollama URL</label>
         <div class="flex gap-2">
           <input
@@ -507,6 +514,21 @@
             <option value={r} class="bg-slate-800 text-white">{r}</option>
           {/each}
         </select>
+      </div>
+
+      <div>
+        <label class="block text-xs text-slate-400 mb-1" for="agent-name">Agent name</label>
+        <input
+          id="agent-name"
+          type="text"
+          bind:value={name}
+          oninput={() => { nameEdited = true; }}
+          placeholder={suggestedName}
+          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+        />
+        <p class="text-xs mt-1 text-slate-500">
+          How this agent shows up in the Fleet — pick something you can tell apart from your other agents.
+        </p>
       </div>
 
       {#if !hasTauri}

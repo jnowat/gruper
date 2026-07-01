@@ -96,3 +96,11 @@
   border: 1px solid var(--glass-border); padding: 0.3em 0.6em; text-align: left;
 }
 .markdown-body strong { color: #f1f5f9; font-weight: 600; }
+
+/* Math: KaTeX brings its own styles; keep display math from overflowing the
+   result bubble, and give the escaped-text fallback a subtle look. */
+.markdown-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 0.2em 0; }
+.markdown-body .math-fallback {
+  background: rgba(255, 255, 255, 0.08); color: #cbd5e1;
+  padding: 0.05em 0.3em; border-radius: 0.25rem; font-size: 0.85em;
+}
