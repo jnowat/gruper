@@ -23,6 +23,9 @@
   let rightTab = $state<'compose' | 'analytics'>('compose');
   let loadingData = $state(false);
   let showAddAgent = $state(false);
+  let agentActionError = $state<string | null>(null);
+
+  const hasTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
   const auth = $derived($authStore);
   const agents = $derived($fleetStore);
@@ -67,6 +70,30 @@
     activeAgentId = id;
     // Default to the compose tab when switching agents.
     rightTab = 'compose';
+  }
+
+  /**
+   * Minimum-viable agent management (see ROADMAP.md WP-32.1): stops an
+   * agent this Console spawned locally and marks it offline in the fleet
+   * view. There is no orchestrator DELETE endpoint for agents, so this
+   * can't remove the row outright — the orchestrator converges to the same
+   * "offline" status on its own once it notices the WebSocket drop. A
+   * remote/manually-run agent (or one this Console didn't spawn) can't be
+   * stopped this way; that's expected, not an error to hide.
+   */
+  async function removeAgent(id: string) {
+    agentActionError = null;
+    if (!hasTauri) {
+      agentActionError = 'Stopping a local agent process requires the desktop app (Tauri).';
+      return;
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('stop_local_agent', { agentId: id });
+      fleetStore.setOffline(id);
+    } catch (err) {
+      agentActionError = err instanceof Error ? err.message : String(err);
+    }
   }
 
   function onTaskSubmitted(taskId: string) {
@@ -119,12 +146,19 @@
           </div>
         </div>
 
+        {#if agentActionError}
+          <div class="mx-2 mb-1 bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded-lg p-2">
+            {agentActionError}
+          </div>
+        {/if}
+
         <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
           {#each agents as agent (agent.id)}
             <AgentCard
               {agent}
               selected={agent.id === activeAgentId}
               onclick={() => selectAgent(agent.id)}
+              onRemove={() => removeAgent(agent.id)}
             />
           {/each}
           {#if agents.length === 0 && !loadingData}
@@ -151,8 +185,28 @@
 
       <!-- Center: Task queue -->
       <div class="flex-1 flex flex-col min-w-0 border-r border-white/5 overflow-hidden">
-        <div class="px-3 py-2 border-b border-white/5">
+        <div class="px-3 py-2 border-b border-white/5 flex items-center justify-between">
           <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Tasks</span>
+          {#if tasks.length > 0}
+            <div class="flex items-center gap-3">
+              {#if tasks.some((t) => t.status === 'failed' || t.status === 'timed_out' || t.status === 'dead_letter')}
+                <button
+                  onclick={() => tasksStore.clearFailed()}
+                  class="text-xs text-slate-500 hover:text-amber-400 transition-colors"
+                  title="Remove failed/timed-out tasks from this list (session-only — does not delete them on the orchestrator)"
+                >
+                  Clear failed
+                </button>
+              {/if}
+              <button
+                onclick={() => { activeTaskId = null; tasksStore.clearAll(); }}
+                class="text-xs text-slate-500 hover:text-red-400 transition-colors"
+                title="Clear this list (session-only — does not delete tasks on the orchestrator)"
+              >
+                Clear all
+              </button>
+            </div>
+          {/if}
         </div>
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           {#each tasks as task (task.id)}

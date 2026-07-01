@@ -29,6 +29,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { authStore, generateRandomPubkey } from '$lib/stores/auth.js';
   import { fleetStore } from '$lib/stores/fleet.js';
   import { OrchestratorClient } from '$lib/api/client.js';
@@ -185,61 +186,101 @@
     detectedModels = [];
   }
 
+  // Set by the user clicking "Stop waiting" — checked at the top of every
+  // poll iteration in waitForAgentOnline so the wait can always be cut
+  // short manually, independent of whatever the timeout/polling is doing.
+  let cancelWaiting = $state(false);
+
+  const AGENT_POLL_INTERVAL_MS = 1500;
+
+  function sleep(ms: number): Promise<void> {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
   /**
-   * Resolves once the freshly-spawned agent either (a) shows up in the
-   * fleet with a non-offline status — the WS "registered" handshake sets it
-   * to "idle" — (b) is reported as crashed via the Rust side's
-   * agent-sidecar-exited event, or (c) the timeout elapses. Listening for
-   * the crash event is attached before the timeout starts so a fast crash
-   * (bad Ollama URL, missing binary on a fresh install) is reported as a
-   * real error instead of a generic "hasn't come online yet" message.
+   * Waits for the freshly-spawned agent to either come online, be reported
+   * as crashed, or time out — implemented as a plain bounded polling loop
+   * rather than a hand-rolled Promise/event-listener graph. That rewrite is
+   * deliberate: a previous version resolved (or so it seemed from code
+   * review) via a fleetStore subscription + a Tauri crash-event listener +
+   * a setTimeout, all wired together with manual cleanup bookkeeping — and
+   * a real Windows test run showed the dialog getting stuck on "Waiting for
+   * agent to connect" indefinitely even though a fleet entry existed. This
+   * version is provably bounded: the `while` condition is wall-clock time
+   * strictly counting down, so barring a JS engine failure it always
+   * returns within `timeoutMs` (plus one poll's REST round-trip).
+   *
+   * Each iteration checks THREE independent signals, not just one:
+   *   1. a crash event from the Rust side (agent-sidecar-exited)
+   *   2. the local fleetStore (fast path — updated by the console WS's
+   *      fleet_event push, when that arrives)
+   *   3. a direct REST re-fetch of GET /v1/agents (authoritative — doesn't
+   *      depend on the WS push ever arriving at all, which is a single
+   *      point of failure this dialog previously depended on entirely)
+   * Depending on only the WS push meant that if it was ever dropped
+   * (reconnect race, a console WS hiccup, whatever) the dialog would sit on
+   * a fleet entry that had, in reality, already come online — this is very
+   * likely what a real user saw as "a new entry does appear in the Fleet
+   * sidebar, but the agent never becomes usable." Polling REST directly
+   * self-heals that regardless of the root cause.
    */
-  function waitForAgentOnline(
+  async function waitForAgentOnline(
     agentId: string,
     timeoutMs: number,
-  ): Promise<{ outcome: 'online' | 'timeout' } | { outcome: 'crashed'; detail: string }> {
-    return new Promise((resolve) => {
-      let settled = false;
-      let unlistenCrash: (() => void) | null = null;
+    client: OrchestratorClient,
+  ): Promise<{ outcome: 'online' | 'timeout' | 'cancelled' } | { outcome: 'crashed'; detail: string }> {
+    let crashDetail: string | null = null;
+    let unlistenCrash: (() => void) | null = null;
 
-      const unsubFleet = fleetStore.subscribe((agents: Agent[]) => {
-        const a = agents.find((x) => x.id === agentId);
-        if (a && a.status !== 'offline' && !settled) {
-          finish({ outcome: 'online' });
+    if (hasTauri) {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlistenCrash = await listen<{ agent_id: string; error?: string; code?: number | null }>(
+          'agent-sidecar-exited',
+          (event) => {
+            if (event.payload.agent_id !== agentId) return;
+            crashDetail =
+              event.payload.error ?? `agent process exited (code ${event.payload.code ?? 'unknown'})`;
+          },
+        );
+      } catch {
+        // Best-effort — if the listener can't be attached for some reason,
+        // the REST/fleetStore polling below still covers the common cases.
+      }
+    }
+
+    try {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (cancelWaiting) return { outcome: 'cancelled' };
+        if (crashDetail) return { outcome: 'crashed', detail: crashDetail };
+
+        const localAgents = get(fleetStore);
+        const local = localAgents.find((a) => a.id === agentId);
+        if (local && local.status !== 'offline') {
+          return { outcome: 'online' };
         }
-      });
 
-      const timer = setTimeout(() => {
-        if (!settled) finish({ outcome: 'timeout' });
-      }, timeoutMs);
+        try {
+          const fresh = await client.listAgents();
+          fleetStore.setSnapshot(fresh);
+          const freshAgent = fresh.find((a) => a.id === agentId);
+          if (freshAgent && freshAgent.status !== 'offline') {
+            return { outcome: 'online' };
+          }
+        } catch {
+          // Network hiccup talking to the orchestrator — keep polling
+          // rather than failing the whole wait over one bad request.
+        }
 
-      function finish(result: Parameters<typeof resolve>[0]) {
-        settled = true;
-        clearTimeout(timer);
-        unsubFleet();
-        unlistenCrash?.();
-        resolve(result);
+        if (cancelWaiting) return { outcome: 'cancelled' };
+        if (crashDetail) return { outcome: 'crashed', detail: crashDetail };
+        await sleep(AGENT_POLL_INTERVAL_MS);
       }
-
-      if (hasTauri) {
-        import('@tauri-apps/api/event').then(({ listen }) => {
-          if (settled) return;
-          listen<{ agent_id: string; error?: string; code?: number | null }>(
-            'agent-sidecar-exited',
-            (event) => {
-              if (event.payload.agent_id !== agentId || settled) return;
-              const detail =
-                event.payload.error ??
-                `agent process exited (code ${event.payload.code ?? 'unknown'})`;
-              finish({ outcome: 'crashed', detail });
-            },
-          ).then((un) => {
-            if (settled) un();
-            else unlistenCrash = un;
-          });
-        });
-      }
-    });
+      return { outcome: 'timeout' };
+    } finally {
+      unlistenCrash?.();
+    }
   }
 
   async function handleSubmit() {
@@ -272,10 +313,11 @@
       },
     };
 
+    const client = new OrchestratorClient(orchestratorUrl, token);
+
     let agent: Agent;
     try {
       step = 'registering';
-      const client = new OrchestratorClient(orchestratorUrl, token);
       agent = await client.registerAgent({
         name: name.trim() || 'Local Agent',
         pubkey: generateRandomPubkey(),
@@ -306,14 +348,31 @@
     }
 
     step = 'waiting';
-    const result = await waitForAgentOnline(agent.id, AGENT_ONLINE_TIMEOUT_MS);
-    if (result.outcome === 'crashed') {
-      error = `The agent process was registered and started, but exited before coming online: ${result.detail}. Check that Ollama is reachable at the URL above, then try again.`;
+    cancelWaiting = false;
+    try {
+      const result = await waitForAgentOnline(agent.id, AGENT_ONLINE_TIMEOUT_MS, client);
+      if (result.outcome === 'crashed') {
+        error = `The agent process was registered and started, but exited before coming online: ${result.detail}. Check that Ollama is reachable at the URL above, then try again.`;
+        step = 'form';
+        return;
+      }
+      if (result.outcome === 'cancelled') {
+        // The agent is already registered and spawned — it keeps trying to
+        // connect on its own even after this dialog closes. There is
+        // deliberately nothing else to clean up here.
+        onclose();
+        return;
+      }
+      timedOut = result.outcome === 'timeout';
+      step = 'done';
+    } catch (err) {
+      // waitForAgentOnline is a bounded loop and should never throw, but if
+      // it somehow does, never leave the dialog frozen on "Waiting for
+      // agent to connect" — surface it and let the user retry or check the
+      // fleet manually instead.
+      error = `Agent was registered and started, but hit an unexpected error while waiting for it to come online: ${err instanceof Error ? err.message : String(err)}. Check the Fleet sidebar — it may still connect on its own.`;
       step = 'form';
-      return;
     }
-    timedOut = result.outcome === 'timeout';
-    step = 'done';
   }
 </script>
 
@@ -321,7 +380,10 @@
   <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-semibold text-white">Add Local Agent</h2>
-      <button onclick={onclose} class="text-slate-500 hover:text-slate-300 text-sm">✕</button>
+      <button
+        onclick={() => { cancelWaiting = true; onclose(); }}
+        class="text-slate-500 hover:text-slate-300 text-sm"
+      >✕</button>
     </div>
 
     {#if step === 'done'}
@@ -408,7 +470,7 @@
           class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         >
           {#each ['analyst', 'creative', 'critic', 'synthesizer', 'expert', 'devil_advocate', 'philosopher', 'economist', 'ethicist', 'scientist', 'psychologist', 'engineer'] as r}
-            <option value={r}>{r}</option>
+            <option value={r} class="bg-slate-800 text-white">{r}</option>
           {/each}
         </select>
       </div>
@@ -442,6 +504,21 @@
           Add Agent
         {/if}
       </button>
+
+      {#if step === 'waiting'}
+        <p class="text-xs text-slate-500 text-center">
+          Checking every {Math.round(AGENT_POLL_INTERVAL_MS / 1000)}s, up to
+          {Math.round(AGENT_ONLINE_TIMEOUT_MS / 1000)}s total. The agent is already registered and
+          running in the background even if you stop waiting now.
+        </p>
+        <button
+          type="button"
+          onclick={() => { cancelWaiting = true; }}
+          class="w-full text-xs text-slate-400 hover:text-slate-200 transition-colors"
+        >
+          Stop waiting and close
+        </button>
+      {/if}
     {/if}
   </div>
 </div>

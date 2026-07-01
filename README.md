@@ -142,6 +142,8 @@ Ollama detection runs automatically when the dialog opens and tells you exactly 
 
 **Windows note:** Ollama detection runs as a Rust command (`detect_ollama_models`), not a frontend `fetch()`. A real Windows hardware test caught a genuine bug here: the webview's own `fetch()` to `http://localhost:11434` is blocked by Chromium/WebView2's Private Network Access policy even when Ollama is running with models installed, because Ollama's server never sends the `Access-Control-Allow-Private-Network` header that policy requires. Moving the request to a Rust-side socket (which isn't a browser page and isn't subject to that policy) fixed it.
 
+After clicking "Add Agent," the dialog polls (every 1.5s, up to 20s) for the new agent to actually come online — checking the local fleet view, a direct `GET /v1/agents` re-fetch, and any crash report from the sidecar process — and reports a concrete error or an honest timeout instead of ever hanging indefinitely; a "Stop waiting and close" button is always available too (the agent keeps running and connecting in the background regardless of whether the dialog is open). Once an agent is added, hovering it in the Fleet sidebar reveals a "✕" to stop it.
+
 **Option B — build from source (any platform), one command:**
 
 ```bash
