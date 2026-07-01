@@ -1,7 +1,7 @@
 # Gruper
 
-[![Core Version](https://img.shields.io/badge/core%20version-0.4.5-blue.svg)](Gruper.html)
-[![Distributed](https://img.shields.io/badge/distributed-gd--0.2%20%E2%80%94%20walking%20skeleton-orange.svg)](orchestrator/)
+[![Core Version](https://img.shields.io/badge/core%20version-0.4.5%20(legacy)-blue.svg)](Gruper.html)
+[![Distributed](https://img.shields.io/badge/distributed-gd--0.2.x%20%E2%80%94%20desktop--first-orange.svg)](orchestrator/)
 [![Build Windows Installer](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml/badge.svg)](https://github.com/jnowat/gruper/actions/workflows/build-windows.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -14,13 +14,13 @@ Gruper is a local-first multi-agent AI system built on [Ollama](https://ollama.a
 | | **Gruper Core** | **Gruper Distributed** |
 |---|---|---|
 | What it is | Single-file browser app | Desktop console + relay orchestrator |
-| Status | Stable — `v0.4.5` | Pre-v1 — walking skeleton (`gd-0.2`) |
+| Status | Stable — `v0.4.5` (**legacy / standalone fallback**) | Pre-v1 — desktop-first foundation (`gd-0.2.x`) |
 | Agents | Up to 6, on one machine | Unlimited, across machines and owners |
 | Sharing | None | Scoped cross-user tokens with instant revocation |
 | Infrastructure | None — open the file | Orchestrator (SQLite by default, no Docker) + agent runtime |
-| Best for | Quick single-machine sessions | Distributed work, collaboration, cloud burst |
+| Best for | Quick single-machine sessions, zero dependencies | Distributed work, collaboration, cloud burst |
 
-Both tiers share the same Ollama API shape, 12 agent role templates, circuit-breaker discipline, and Chart.js visual language. Core is the proven baseline; Distributed extends it without replacing it.
+Both tiers share the same Ollama API shape, 12 agent role templates, circuit-breaker discipline, and Chart.js visual language. **Gruper Distributed is now the project's primary forward direction** — new capability (cross-machine relay, cross-owner sharing, AWS burst, the Manager Console) lands there. **Gruper Core is the stable, fully maintained legacy/standalone fallback**: still the fastest way to get six agents running with zero install, but it receives maintenance and dependency upkeep rather than new features. Distributed reuses Core's proven patterns rather than reinventing them; it does not replace or require Core.
 
 ---
 
@@ -116,7 +116,7 @@ A companion system that extends Gruper Core across multiple machines and multipl
 
 ### Current status
 
-**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is nearly there — task dispatch, the Manager Console scaffold, **and end-to-end relay validation (WP-06)** are done. The automated E2E harness drives the real relay (console → orchestrator → agent → Ollama → back) and is **17/17 green**; running it for the first time surfaced and fixed five message-contract bugs that had silently prevented dispatch from ever working. **Phase 1.5 (desktop-first foundation) is also code-complete and validated on Linux:** the orchestrator defaults to SQLite (WP-30), both the orchestrator and agent are packaged as self-contained executables (WP-31), and the Console auto-starts and auto-connects to a local orchestrator with zero manual steps (WP-32) — see the desktop quick start below. The remaining gates are the real two-machine public-internet/NAT field run (`gd-0.2`) and running the desktop packaging/auto-run stack on a real Windows machine (`gd-0.2.x`, WP-31/WP-32) — see [ROADMAP.md](ROADMAP.md) for the honest current state.
+**Phase 0 (`gd-0.1`) is complete.** Wire contracts frozen, skeleton orchestrator running, agent runtime implemented. Phase 1 (`gd-0.2`) is nearly there — task dispatch, the Manager Console scaffold, **and end-to-end relay validation (WP-06)** are done. The automated E2E harness drives the real relay (console → orchestrator → agent → Ollama → back) and is **17/17 green**; running it for the first time surfaced and fixed five message-contract bugs that had silently prevented dispatch from ever working. **Phase 1.5 (desktop-first foundation) is also code-complete and validated on Linux:** the orchestrator defaults to SQLite (WP-30), both the orchestrator and agent are packaged as self-contained executables (WP-31), the Console auto-starts and auto-connects to a local orchestrator with zero manual steps (WP-32), a "+ Add Local Agent" flow takes a user from zero agents to a running one (WP-32.1), and a desktop-hardening pass adds a unified cross-tier debug logging system, explicit default-model selection, and a master/detail result view (WP-32.2) — see the desktop quick start below. A same-day Phase 2 plan ([`docs/Phase2-gd-0.3-Plan.md`](docs/Phase2-gd-0.3-Plan.md)) lays out the cross-network sharing work (WP-07…WP-11) in detail, but that code has not started yet. The remaining gates are the real two-machine public-internet/NAT field run (`gd-0.2`) and running the desktop packaging/auto-run/onboarding stack on a real Windows machine (`gd-0.2.x`, WP-31/WP-32/WP-32.1) — see [ROADMAP.md](ROADMAP.md) for the honest current state.
 
 **What's shipped (`gd-0.1` / `gd-0.2` / `gd-0.2.x`):**
 
@@ -125,10 +125,10 @@ A companion system that extends Gruper Core across multiple machines and multipl
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
 | `orchestrator/` | ✅ Running, packaged | FastAPI, JWT auth (auto-generated on first run), task dispatch + result relay, console WS; **SQLite by default, PostgreSQL opt-in for the server tier (WP-30)**; self-contained executable via PyInstaller (WP-31) |
 | `agent-runtime/` | ✅ Code complete, packaged | Outbound WSS client, Ollama, offline queue, circuit breaker; dispatch contract validated in WP-06; self-contained executable via PyInstaller (WP-31) |
-| `console/` | ✅ Scaffold complete, auto-connect, agent onboarding | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; **auto-starts and auto-connects to a local orchestrator sidecar with zero manual steps (WP-32)**; **"+ Add Local Agent" registers a fresh agent identity, probes local Ollama for models, and spawns it as a second sidecar — no config files, no manual JWT copy-paste, single-machine scope** |
+| `console/` | ✅ Scaffold complete, auto-connect, agent onboarding, debug tooling | Tauri v2 + Svelte 5; fleet view, task composer, master/detail result view, analytics; **auto-starts and auto-connects to a local orchestrator sidecar with zero manual steps (WP-32)**; **"+ Add Local Agent" registers a fresh agent identity, probes local Ollama for models, and spawns it as a second sidecar — no config files, no manual JWT copy-paste, single-machine scope**; **unified cross-tier Debug panel, explicit default-model selection, and a master/detail result view replacing the old cramped right-rail (WP-32.2 — see [docs/Debug-Logging.md](docs/Debug-Logging.md))** |
 | end-to-end relay | ✅ Automated E2E green | `tests/e2e/` drives the real relay 17/17 on both SQLite and PostgreSQL; real-NAT field run pending ([WP-06 report](docs/WP-06-Validation.md)) |
 
-**⚠️ Honest caveat:** WP-31/WP-32 above were built and verified on **Linux only**. The Windows CI build job (`build-windows.yml`) **has succeeded repeatedly** — 18 green runs as of this writing, including on `main` — so the `.exe`/`.msi` installers it produces do build and bundle correctly. What's still unverified is a human actually downloading one of those installers and running it on **physical Windows hardware**: the sidecar auto-run path, the SQLite/JWT-secret file locations, and the orphan-detection watchdog have only been exercised on Linux. See [ROADMAP.md](ROADMAP.md) for the specifics.
+**⚠️ Honest caveat:** WP-31/WP-32/WP-32.1/WP-32.2 above were built and verified on **Linux only**. The Windows CI build job (`build-windows.yml`) **has succeeded repeatedly** — 18 green runs as of this writing, including on `main` — so the `.exe`/`.msi` installers it produces do build and bundle correctly. What's still unverified is a human actually downloading one of those installers and running it on **physical Windows hardware**: the sidecar auto-run path, the SQLite/JWT-secret file locations, the agent onboarding flow's latest fixes, and the orphan-detection watchdog have only been exercised on Linux. See [ROADMAP.md](ROADMAP.md) for the specifics.
 
 ### Desktop quick start (no Docker, no PostgreSQL, no manual Python)
 
@@ -195,7 +195,7 @@ Every agent dials *outbound* WSS to the orchestrator. Nothing connects inward. N
 |-----------|-------|--------|
 | `gd-0.1` | Wire Contracts & Schema Freeze | ✅ Complete |
 | `gd-0.2` | Walking Skeleton — single-owner relay over the internet | 🔄 Automated E2E relay green (17/17); real-NAT field run pending |
-| `gd-0.3` | Cross-Network Sharing — scoped tokens, cross-owner dispatch | 🔲 Planned |
+| `gd-0.3` | Cross-Network Sharing — scoped tokens, cross-owner dispatch | 🔲 Planned — detailed plan written ([docs/Phase2-gd-0.3-Plan.md](docs/Phase2-gd-0.3-Plan.md)); code not started |
 | `gd-0.4` | Cloud Burst — AWS spot fleet with hard cost cap | 🔲 Planned |
 | `gd-0.5` | Security Hardening — sandbox parity, E2E encryption, audit chain | 🔲 Planned |
 | `gd-0.6–0.9` | Beta & Polish — capability dispatch, crew builder, n8n integration | 🔲 Planned |
@@ -299,7 +299,7 @@ certificate before v1.0.
 
 ## Contributing
 
-**Core (`Gruper.html`)** — single-file patches. Keep it browser-only with no build step. Open an issue first for anything beyond a bug fix.
+**Core (`Gruper.html`)** — legacy/standalone fallback tier; accepts single-file patches (bug fixes, dependency upkeep). Keep it browser-only with no build step. Open an issue first for anything beyond a bug fix — new feature work belongs in Distributed.
 
 **Distributed (`spec/`, `orchestrator/`, `agent-runtime/`, `console/`)** — start with [`GruperDistributedSpec.md`](GruperDistributedSpec.md) and [`ROADMAP.md`](ROADMAP.md). Read the contracts package (`spec/contracts/`) before writing any code — the schema freeze is the foundation everything else builds against.
 

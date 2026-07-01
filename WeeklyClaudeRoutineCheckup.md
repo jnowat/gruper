@@ -2160,3 +2160,212 @@ No P0 or P2 structural issues remain.
 *Next scheduled review: 2026-07-04 (weekly cadence)*
 *Key watches: DOMPurify security advisories (weekly — sole XSS defense); Chart.js patch releases; CI run results on first push with new SRI verification step*
 *Review cadence changed: Daily → Weekly as of 2026-06-26 (all P0/P1 issues resolved; stable maintenance phase)*
+
+---
+
+## Review Entry: 2026-07-01
+
+**Reviewer:** Claude (Sonnet 5 via Claude Code)
+**Branch reviewed:** `main` (commit `3b42224` — PR #25 merged 2026-07-01) via working branch `claude/keen-mendel-g8x2ns`
+**Repository:** `jnowat/gruper`
+**Scope of this review:** For the first time, this checkup covers the **entire repository**, not just `Gruper.html`. Since the last entry (2026-06-27), the project grew from a single-file app plus a design spec into a two-tier system: **Gruper Core** (`Gruper.html`, unchanged) and **Gruper Distributed** (`spec/`, `orchestrator/`, `agent-runtime/`, `console/`) — a companion desktop console + orchestrator that went from "design draft" to "code-complete desktop-first stack, Linux-validated" in five days. Per this session's instructions, **Gruper Distributed is now treated as the project's primary forward direction; Gruper Core is the stable, maintained legacy/standalone fallback.** This entry documents that shift and the documentation-congruence work done to reflect it consistently across `README.md`, `ROADMAP.md`, `GruperDistributedSpec.md`, `CHANGELOG.md`, and `UserManual.md`.
+**Files reviewed:** `README.md`, `CHANGELOG.md`, `ROADMAP.md`, `UserManual.md`, `GruperDistributedSpec.md`, `docs/Phase2-gd-0.3-Plan.md`, `docs/Debug-Logging.md`, `docs/WP-06-Validation.md`, `.github/workflows/{check,build-windows,orchestrator-tests}.yml`, `orchestrator/README.md`, `console/package.json` / `src-tauri/tauri.conf.json`, and a structural spot-check of `orchestrator/`, `agent-runtime/`, `console/`, `spec/contracts/`. `Gruper.html` itself: version/structure spot-check only (zero commits touched it this period — see below).
+
+---
+
+### 1. Project Status
+
+| Attribute | Value |
+|---|---|
+| Gruper Core version | `0.4.5` — **unchanged since 2026-01-31**; zero commits to `Gruper.html` since the last review (confirmed via `git log -- Gruper.html`) |
+| Gruper Distributed milestone | `gd-0.1` ✅ complete · `gd-0.2` 🔄 automated E2E green (17/17, both backends), real-NAT field run pending · `gd-0.2.x` 🟡 code-complete, Linux-validated, Windows hardware validation pending · `gd-0.3` 🔲 planned (plan doc written, no code yet) |
+| Commits since 2026-06-27 review | **56** (20 of them merge commits — PRs #6 through #25) |
+| New files added since 2026-06-27 | **120** of the repo's current 128 tracked files |
+| Distributed system size (new since 2026-06-27) | `orchestrator/`: 3,276 Python LOC · `agent-runtime/`: 905 Python LOC · `console/src`: 2,947 Svelte/TS LOC · `console/src-tauri/src`: 1,121 Rust LOC · `spec/contracts/`: 9 schema/contract files |
+| LICENSE / core CI (`check.yml`) | ✅ Unchanged, still green (no Gruper.html changes to re-check) |
+| Orchestrator CI (`orchestrator-tests.yml`) | ✅ Present since WP-30 — two jobs (SQLite, PostgreSQL), both reported green in ROADMAP.md |
+| Windows installer CI (`build-windows.yml`) | ✅ 18 green runs reported as of this writing, including on `main` |
+| `WeeklyClaudeRoutineCheckup.md` scope | **Expanded this entry** from "Gruper.html only" to "whole repository" — see note above |
+
+**Overall assessment:** Gruper Core is in the same healthy, stable state documented on 2026-06-27 — no code changes, no regressions, all previously-resolved issues remain resolved. The major event this period is entirely on the Distributed side: **20 merged PRs in 5 days** took the project from a frozen spec (`gd-0.1`) through a working, automated-E2E-validated relay (`gd-0.2`) to a desktop-first, no-Docker, SQLite-default, self-packaging stack with working agent onboarding and unified debug tooling (`gd-0.2.x`) — all rigorously self-documented in `ROADMAP.md` with explicit exit gates, honest caveats, and named bugs-found-and-fixed. The engineering discipline in `ROADMAP.md` itself is unusually high (every WP records what broke, how it was found, and what remains unverified). The gap this review closes is that **the project's other reference documents had not kept pace with `ROADMAP.md`** — see §3.
+
+---
+
+### 2. What Happened Since 2026-06-27 (Summary)
+
+**Phase 0 — Foundations (`gd-0.1`) — complete:** wire contracts frozen (`spec/contracts/`: OpenAPI 3.1, WSS message schema, 5 JSON Schema models), skeleton orchestrator (FastAPI + PostgreSQL + Docker Compose), OQ-1/OQ-2 resolved.
+
+**Phase 1 — Walking Skeleton (`gd-0.2`) — code complete:** agent runtime desktop MVP (WP-03), orchestrator task dispatch (WP-04), Manager Console scaffold — Tauri v2 + Svelte 5 (WP-05), Windows installer CI fixed and green, and an automated end-to-end relay harness that went **17/17 green** after finding and fixing **5 real dispatch-contract bugs** on its first run (WP-06). The real two-machine public-internet/NAT field run remains the one open item in this phase.
+
+**Phase 1.5 — Desktop-First Foundation (`gd-0.2.x`) — the headline pivot:** the project reframed itself from "Docker + PostgreSQL first" to "a single Windows desktop user with no Docker and no DB server, full stop." In order: SQLite became the orchestrator's default backend with PostgreSQL opt-in via `DATABASE_URL` (WP-30, closing a real pre-existing WS concurrency bug along the way); both the orchestrator and agent were packaged as self-contained PyInstaller executables with zero-config JWT secret generation (WP-31); the Tauri Console was rewired to spawn, health-check, and auto-connect to a local orchestrator sidecar with no manual steps, verified against the real production `tauri build` binary via screenshot (WP-32); a "+ Add Local Agent" onboarding flow was added and went through **three rounds of real-Windows-hardware bug reports**, each finding and fixing a genuine bug (placeholder-agent registration, a Chromium/WebView2 Private Network Access probe failure, an indefinitely-hanging wait state, a white-on-white dropdown) (WP-32.1); and a same-day desktop-hardening pass added a unified cross-tier debug logging system, explicit default-model selection, and a master/detail result view (WP-32.2 — **previously shipped in code but undocumented in `ROADMAP.md` until this session, see §3**).
+
+**Phase 2 planning:** `docs/Phase2-gd-0.3-Plan.md` lays out WP-07…WP-11 (multi-tenant identity, share tokens, cross-owner dispatch, sharing UI, manager-agent delegation) in detail grounded in the actual codebase, and explicitly recommends hardening the desktop tier first — the recommendation WP-32.2 then executed on, same day.
+
+**What has not started:** none of Phase 2's code (WP-07…WP-11). The plan exists; the implementation does not yet.
+
+---
+
+### 3. Documentation Congruence Audit (this session's primary task)
+
+The instruction for this review was to bring `README.md`, `ROADMAP.md`, `CHANGELOG.md`, and `UserManual.md` into congruence with each other and with the new distributed direction, and to make Gruper Core's positioning as legacy/fallback explicit throughout. Findings, ranked by how much reader-facing confusion each one caused:
+
+#### 🔴 HIGH — `CHANGELOG.md` had zero entries for the entire Distributed build-out
+
+**Before this session:** `CHANGELOG.md`'s newest entry was the 2026-06-15→06-27 Gruper Core maintenance record. Despite 20 merged PRs and ~8,200 lines of new orchestrator/agent/console code landing in the five days since, **none of it was reflected in the changelog** — a reader relying on `CHANGELOG.md` alone would have no idea Gruper Distributed existed past the design-spec stage.
+
+**Fixed this session:** added a new top-level entry, "Gruper Distributed — `gd-0.1` → `gd-0.2.x` (2026-06-27 → 2026-07-01) — Foundations Through Desktop Hardening," summarizing every phase (WP-01 through WP-32.2) at a level of detail matched to a changelog (not duplicating `ROADMAP.md`'s full engineering log), plus a scope note explaining that the changelog now tracks both tiers.
+
+---
+
+#### 🟠 HIGH — `GruperDistributedSpec.md` still described a PostgreSQL-first architecture, contradicting the shipped desktop-first pivot
+
+**Before this session:** this was already a **known, named item** in `ROADMAP.md`'s Known Technical Debt table ("Companion spec not yet desktop-first," Medium severity) — confirmed still open on inspection. §5.1's "Recommended stack" table listed `PostgreSQL (multi-user)` as the database choice with `SQLite + Litestream for single-user self-host` as a parenthetical footnote — the exact inverse of what WP-30 actually shipped (SQLite default, PostgreSQL opt-in). §9's storage note and §10's technology table had the same inversion.
+
+**Fixed this session:** §5.1, §9, and §10 rewritten to lead with SQLite-by-default / PostgreSQL-opt-in, matching `ROADMAP.md`'s "Two deployment tiers" framing exactly. Added a positioning note near the top of the spec making the legacy-Core / primary-Distributed framing explicit. Bumped `spec_version` to `0.2.1` and the `date` frontmatter field to `2026-07-01` to reflect the alignment pass. `ROADMAP.md`'s Known Technical Debt entry for this item marked ✅ resolved.
+
+---
+
+#### 🟡 MEDIUM — `ROADMAP.md` didn't document the desktop-hardening pass (WP-32.2) that had already shipped
+
+**Before this session:** `72b5cee` (debug logging, model selection, master/detail result view) landed the same day as this review, after `a095f2f` (the Phase 2 plan) — but no `ROADMAP.md` section existed for it. A reader of `ROADMAP.md` alone would not know the debug panel, default-model selection, or the reworked result view existed.
+
+**Fixed this session:** added a new `WP-32.2 — Desktop Hardening Pass` subsection under Phase 1.5 with the same level of detail (what shipped, files touched, exit gate) as its neighboring WPs; updated the Phase Summary table and the top status header to include it.
+
+---
+
+#### 🟡 MEDIUM — `README.md`'s Distributed badge and positioning language were stale
+
+**Before this session:** the badge read `gd-0.2 — walking skeleton`, which undersold the actual state (`gd-0.2.x` desktop-first work is code-complete) and the "Core is the proven baseline; Distributed extends it" framing did not reflect the requested legacy/primary-direction pivot.
+
+**Fixed this session:** badge updated to `gd-0.2.x — desktop-first`; the two-tier comparison table now marks Core `(legacy / standalone fallback)`; the framing paragraph explicitly states Distributed is the primary forward direction and Core receives maintenance/dependency upkeep rather than new features; the "what's shipped" table and "Contributing" section updated to match; the Windows-hardware-caveat paragraph extended to cover WP-32.1/WP-32.2 (previously only named WP-31/WP-32).
+
+---
+
+#### 🟢 LOW — `UserManual.md` had no pointer to Gruper Distributed at all
+
+**Before this session:** the manual documented Core exclusively (correctly, since it's a Core user manual) but gave no indication that a reader wanting multi-machine or cross-owner agents should look elsewhere, or that Core itself is now the legacy tier.
+
+**Fixed this session:** added a short scope banner directly under the title clarifying the manual's scope and pointing to `GruperDistributedSpec.md`/`ROADMAP.md`; added a Distributed Spec link to the footer's "See also" line.
+
+---
+
+### 4. Gruper Core (`Gruper.html`) — Verification, No Regressions
+
+No commits touched `Gruper.html` this period (confirmed via `git log --since=2026-06-27 -- Gruper.html` → empty). All findings and fixes from the 2026-06-14 through 2026-06-27 review cycle remain valid and unregressed:
+
+- Version consistency (`0.4.5` across `APP_VERSION`, `<title>`, badges, README, CHANGELOG) — ✅ still consistent
+- Single, current, SRI-verified CDN tags for Chart.js `4.5.1` and DOMPurify `3.4.11` — ✅ unchanged
+- `localStorage` quota guard, `<noscript>` fallback, 18 annotation-free JS section delimiters, 18 CSS section banners — ✅ unchanged
+- `ROADMAP.md`/`UserManual.md` presence — ✅ (both now also cross-link to Distributed, see §3)
+- Deferred items unchanged: **62 inline `onclick` handlers** (still deferred — no regression risk, no new action this session); **README screenshots** still "coming soon" (no images available); **dependency freshness** (DOMPurify/Chart.js) cannot be re-verified from this execution environment, as established in the 2026-06-16 review — this remains a standing manual/weekly check for the repo owner
+
+**No new Gruper Core issues found this session.**
+
+---
+
+### 5. New Findings — Gruper Distributed (Low Severity / Informational)
+
+These are observations from this session's congruence-focused pass, not a full code review of the distributed system (that would warrant its own dedicated review given ~8,200 new lines of code) — the items below are the kind of thing a documentation/consistency pass surfaces in passing.
+
+#### 🟢 LOW — `console/package.json` version string hasn't tracked the `gd-0.x` milestone bumps
+
+**Location:** `console/package.json` line 4 — `"version": "0.1.0-gd.0.2"`; `console/src-tauri/tauri.conf.json` — `"version": "0.1.0"`.
+
+The console's own package version still says `gd.0.2` even though the project has moved into `gd-0.2.x` (desktop-first) and Phase 2 planning. This is an internal build-tooling version string, not user-facing, and does not affect anything functionally — flagged for the next version-bump pass, not urgent enough to change blind in a documentation-focused session (a version bump here should be deliberate, ideally paired with a real release tag).
+
+#### 🟢 LOW — Minor plan-vs-shipped drift in the debug logging verbosity default
+
+`docs/Phase2-gd-0.3-Plan.md` §1.5 proposed the debug logging system as "off-by-default, one click to loud." The shipped implementation (`docs/Debug-Logging.md`, "Verbosity" section) is "always on at `info`+," with a note that a runtime toggle is deferred. This is expected, ordinary drift between a plan document written before implementation and the actual shipped behavior — not a bug — but worth flagging so a future reader doesn't treat the plan doc as ground truth for what shipped. No fix applied; `docs/Phase2-gd-0.3-Plan.md` is correctly framed as a plan, not a spec of final behavior.
+
+#### 🟢 LOW (carried forward, already tracked) — Known Technical Debt items already documented in `ROADMAP.md`
+
+Confirmed still accurately tracked and not duplicated here: `asyncpg` hard dependency on pure-SQLite builds (Low-Medium); desktop sandboxing absent on Windows/macOS until `gd-0.5`/WP-15 (High — blocks cross-owner sharing on those platforms); `events` table lacks hash-chain until WP-17 (Medium); single-orchestrator SPOF (Medium, server-tier only); no full integration test suite (Medium). All correctly reflect the current state on inspection — no changes needed.
+
+---
+
+### 6. Changes Made This Session
+
+| File | Change |
+|---|---|
+| `CHANGELOG.md` | Added full "Gruper Distributed — `gd-0.1` → `gd-0.2.x`" entry (WP-01 through WP-32.2, Phase 2 planning, this session's doc congruence work); added a scope note explaining dual-tier tracking |
+| `GruperDistributedSpec.md` | §5.1 (recommended stack), §9 (data models), §10 (technology table) rewritten SQLite-default/PostgreSQL-opt-in; added a legacy-Core/primary-Distributed positioning note; `spec_version` → `0.2.1`, `date` → `2026-07-01` |
+| `ROADMAP.md` | Added `WP-32.2 — Desktop Hardening Pass` section; updated Phase Summary table and top status header; marked the "companion spec not yet desktop-first" Known Technical Debt item ✅ resolved; updated footer note |
+| `README.md` | Distributed badge `gd-0.2 walking skeleton` → `gd-0.2.x desktop-first`; two-tier table marks Core as legacy/standalone fallback; positioning paragraph states Distributed is the primary forward direction; "what's shipped" table and roadmap-at-a-glance updated for WP-32.2 and the Phase 2 plan doc; Windows-hardware caveat extended to WP-32.1/WP-32.2; "Contributing" section updated |
+| `UserManual.md` | Added scope banner pointing Distributed-curious readers to `GruperDistributedSpec.md`/`ROADMAP.md`; footer "See also" line extended |
+| `WeeklyClaudeRoutineCheckup.md` | This entry — first whole-repository review; documents the Core/Distributed congruence pass |
+
+**No changes made to:** `Gruper.html`, `orchestrator/`, `agent-runtime/`, `console/` source code, `spec/contracts/`, or any CI workflow — this session was scoped to cross-document congruence, not application code.
+
+---
+
+### 7. Issue Tracker (Cumulative — Distributed items added)
+
+| Issue | Status | Notes |
+|---|---|---|
+| 🔴 CHANGELOG.md missing all Distributed entries | ✅ **Resolved this session** | Full entry added |
+| 🟠 GruperDistributedSpec.md not desktop-first-aligned | ✅ **Resolved this session** | Matches `ROADMAP.md`'s Known Technical Debt closure |
+| 🟡 ROADMAP.md missing WP-32.2 documentation | ✅ **Resolved this session** | New subsection added |
+| 🟡 README.md badge/positioning stale | ✅ **Resolved this session** | Badge, tables, framing updated |
+| 🟢 UserManual.md no Distributed pointer | ✅ **Resolved this session** | Scope banner + footer link added |
+| 🟢 console/package.json version string stale (`gd.0.2`) | Open — low priority | Flagged for next deliberate version-bump pass |
+| 🟢 Plan-vs-shipped drift: debug logging verbosity default | Informational only | Not a defect; plan doc predates implementation |
+| 🟡 62 inline `onclick` handlers (Gruper Core, carried forward) | Open — deferred | No change this session |
+| 🟢 README screenshots (Gruper Core, carried forward) | Open — deferred | No images available |
+| 🟡 Dependency freshness — DOMPurify/Chart.js (Gruper Core, carried forward, recurring) | Open — recurring weekly check | Cannot verify from this execution environment |
+| 🟠 Real two-machine NAT field run (`gd-0.2` exit gate) | Open | Tracked in `ROADMAP.md`/`docs/WP-06-Validation.md` §7 |
+| 🟠 Windows hardware validation (WP-31/32/32.1/32.2) | Open — single biggest Distributed risk | Windows CI green (18 runs); no human has run the installers on physical Windows hardware yet |
+| 🟡 `asyncpg` hard dependency on pure-SQLite builds | Open | Tracked in `ROADMAP.md` Known Technical Debt |
+| 🔴 Desktop sandboxing absent on Windows/macOS | Open — blocks cross-owner sharing there | Gated to `gd-0.5`/WP-15/WP-18 |
+
+---
+
+### 8. Actionable Recommendations
+
+| # | Recommendation | Priority | Effort | Owner |
+|---|---|---|---|---|
+| REC-1 | Get a real Windows machine to run the CI-produced installers (Console + orchestrator + agent) end to end, including "+ Add Local Agent" — this is the single highest-value action across all of Distributed right now | **P0** | 1–2 hrs (owner has Windows hardware; not available in this environment) | Repo owner |
+| REC-2 | Run the real two-machine public-internet/NAT field test per `docs/WP-06-Validation.md` §7 | P1 | ~1 hr, needs 2 machines | Repo owner |
+| REC-3 | Weekly dependency-freshness check for Gruper Core (DOMPurify/Chart.js — cannot be done from this environment) | P1 (recurring) | 5 min | Repo owner |
+| REC-4 | Trim the `asyncpg` hard dependency from pure-SQLite orchestrator builds (lazy import or split requirements) | P2 | ~1 hr | Next Distributed session |
+| REC-5 | Decide and apply a real version bump for `console/package.json`/`tauri.conf.json` alongside the next tagged release, rather than leaving `gd.0.2` stale indefinitely | P3 | 10 min | Next release pass |
+| REC-6 | Continue treating `ROADMAP.md` as the single source of engineering truth and update `README.md`/`CHANGELOG.md` **in the same PR** as any future WP work, to prevent this session's congruence gap from reopening | P2 (process) | — | All future Distributed PRs |
+
+---
+
+### 9. Trend Tracking
+
+| Metric | 2026-06-27 | 2026-07-01 | Trend | Target |
+|---|---|---|---|---|
+| Gruper Core version | `0.4.5` | `0.4.5` | → flat (no core changes) | — |
+| Gruper Core lines/size | 6,221 / 253 KB | 6,221 / 253 KB | → flat | < 7,000 / < 300 KB |
+| Distributed milestone | `gd-0.1`/`gd-0.2` walking skeleton | `gd-0.2.x` desktop-first, code-complete | ↑ major | `gd-0.3` |
+| Merged PRs (Distributed) | 5 (#6–#17 partial) | **20** (#6–#25) | ↑ +15 in 5 days | growing |
+| New Distributed LOC | ~0 (spec only) | **~8,200** (orchestrator + agent + console) | ↑ new | track |
+| Orchestrator CI | absent | ✅ present, 2 jobs (SQLite/Postgres) | ↑ new | ≥ 1 (met) |
+| Windows installer CI runs (green) | not tracked | **18** | ↑ | growing |
+| CHANGELOG.md covers Distributed | ❌ No | ✅ **Yes** | ↑ resolved | Yes |
+| GruperDistributedSpec.md desktop-first-aligned | ❌ No (tracked debt) | ✅ **Yes** | ↑ resolved | Yes |
+| ROADMAP.md documents all shipped WPs | Mostly (WP-32.2 missing) | ✅ **Yes** | ↑ resolved | Yes |
+| README.md Distributed badge accuracy | Stale (`gd-0.2`) | ✅ Current (`gd-0.2.x`) | ↑ resolved | Current |
+| UserManual.md references Distributed | ❌ No | ✅ **Yes** | ↑ resolved | Yes |
+| Open critical issues (whole repo) | 0 | 0 | → flat | 0 |
+| Open high issues (whole repo) | 0 (Core) | 1 (Distributed: desktop sandboxing gap, gated to `gd-0.5`, expected at this stage) | — | 0 at `v1.0` |
+
+---
+
+### 10. Next Steps
+
+| Priority | Action | Est. effort |
+|---|---|---|
+| P0 | Run CI-produced Windows installers on real hardware (Console, orchestrator, agent, full onboarding flow) | 1–2 hrs |
+| P1 | Real two-machine NAT field run (`gd-0.2` exit gate) | ~1 hr |
+| P1 (weekly) | Gruper Core dependency-freshness check (DOMPurify/Chart.js) | 5 min |
+| P2 | Trim `asyncpg` hard dependency from pure-SQLite orchestrator builds | ~1 hr |
+| P2 | Keep README/CHANGELOG updates in the same PR as future WP work (process fix, not code) | ongoing |
+| P3 | Deliberate version bump for `console/package.json`/`tauri.conf.json` at next tagged release | 10 min |
+
+---
+
+*Next scheduled review: 2026-07-08 (weekly cadence)*
+*Key watches: Windows hardware validation results (WP-31/32/32.1/32.2 — the single biggest open Distributed risk); real two-machine NAT field run; Phase 2 (`gd-0.3`) code start; Gruper Core dependency freshness (DOMPurify/Chart.js, weekly)*
+*Scope note: this review covered the whole repository for the first time. Future entries should continue to do so given Gruper Distributed is now the primary active development surface.*
