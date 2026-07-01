@@ -135,7 +135,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_orchestrator_status,
             spawn_local_agent,
-            detect_ollama_models
+            detect_ollama_models,
+            stop_local_agent
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -187,6 +188,35 @@ fn kill_sidecar_if_owned<R: tauri::Runtime>(manager: &impl Manager<R>) {
     // orchestrator/agent we spawned should not outlive the Console
     // window/app that owns it.
     kill_all_sidecars(&manager.state::<SidecarState>());
+}
+
+/// Minimum-viable agent management: stops an agent this Console spawned
+/// locally (see `spawn_local_agent`). There is deliberately no
+/// orchestrator-side delete here — the orchestrator has no DELETE
+/// /v1/agents/{id} endpoint (out of scope for this pass) — so the frontend
+/// marks the fleet row `offline` itself after this succeeds; the
+/// orchestrator will independently reach the same conclusion once it
+/// notices the agent's WebSocket connection drop, so the two converge.
+/// Returns an error (not a crash) for an agent this Console isn't tracking
+/// — e.g. a remote/manually-run agent, or one already stopped — since that
+/// is an expected, common case (not every fleet entry is locally-spawned),
+/// and the frontend shows that as a plain message rather than "removal
+/// failed."
+#[tauri::command]
+fn stop_local_agent(app: AppHandle, agent_id: String) -> Result<(), String> {
+    let child = app
+        .try_state::<SidecarState>()
+        .and_then(|state| state.agents.lock().unwrap().remove(&agent_id));
+
+    match child {
+        Some(child) => child
+            .kill()
+            .map_err(|e| format!("agent process could not be stopped: {e}")),
+        None => Err(
+            "this agent isn't managed by this Console (it wasn't spawned locally, or has already stopped)"
+                .to_string(),
+        ),
+    }
 }
 
 async fn manage_orchestrator(app: AppHandle) {

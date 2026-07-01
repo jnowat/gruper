@@ -115,7 +115,7 @@
           class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         >
           {#each ROLE_TEMPLATES as r}
-            <option value={r}>{r}</option>
+            <option value={r} class="bg-slate-800 text-white">{r}</option>
           {/each}
         </select>
       </div>
@@ -128,9 +128,9 @@
           bind:value={dataClass}
           class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         >
-          <option value="public">Public</option>
-          <option value="internal">Internal</option>
-          <option value="confidential">Confidential</option>
+          <option value="public" class="bg-slate-800 text-white">Public</option>
+          <option value="internal" class="bg-slate-800 text-white">Internal</option>
+          <option value="confidential" class="bg-slate-800 text-white">Confidential</option>
         </select>
       </div>
     </div>

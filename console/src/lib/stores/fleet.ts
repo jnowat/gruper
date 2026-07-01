@@ -42,6 +42,19 @@ function createFleetStore() {
       );
     },
 
+    /**
+     * Mark one agent offline immediately (used after stopping a locally-
+     * spawned agent — see stop_local_agent in console/src-tauri/src/lib.rs).
+     * There is no orchestrator DELETE endpoint for agents, so this doesn't
+     * remove the row; the orchestrator converges to the same "offline"
+     * status on its own once it notices the WebSocket connection drop.
+     */
+    setOffline(agentId: string) {
+      store.update((agents) =>
+        agents.map((a) => (a.id === agentId ? { ...a, status: 'offline' as AgentStatus } : a)),
+      );
+    },
+
     reset() {
       store.set([]);
     },

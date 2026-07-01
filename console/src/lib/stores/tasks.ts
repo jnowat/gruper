@@ -62,6 +62,23 @@ function createTasksStore() {
     reset() {
       store.set({ tasks: [], progress: {} });
     },
+
+    /**
+     * Client-side only — there is no backend DELETE endpoint for tasks, so
+     * "clearing" here just drops them from this session's view. A fresh
+     * REST reload or WS reconnect would bring persisted tasks back; this is
+     * for tidying up a long-running session's list, not real deletion.
+     */
+    clearFailed() {
+      store.update((s) => ({
+        ...s,
+        tasks: s.tasks.filter((t) => t.status !== 'failed' && t.status !== 'timed_out' && t.status !== 'dead_letter'),
+      }));
+    },
+
+    clearAll() {
+      store.update((s) => ({ ...s, tasks: [] }));
+    },
   };
 }
 
