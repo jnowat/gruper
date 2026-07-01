@@ -253,14 +253,22 @@ class AgentWSClient:
 
     def _model_and_options(self, task_input: dict) -> tuple[str, dict]:
         prefs = task_input.get("model_preferences") or {}
-        # Fall back to this agent's own configured capabilities (set via the
-        # CAPABILITIES env var — see config.py and, for a Console-spawned
-        # sidecar, spawn_local_agent in console/src-tauri/src/lib.rs) rather
-        # than a hardcoded tag. Registering with detected models is worthless
-        # if task execution ignores them and always reaches for the same
-        # hardcoded default regardless of what's actually installed.
-        configured_models = settings.capabilities_dict().get("models") or []
-        default_model = configured_models[0] if configured_models else "llama3.1:8b"
+        # Resolve the model in priority order:
+        #   1. the task's explicit model_preferences.name (per-task override),
+        #   2. the agent's chosen capabilities.default_model (picked in "Add
+        #      Local Agent" — no longer a silent models[0] accident),
+        #   3. the first advertised model, then a hardcoded last resort.
+        # An empty/whitespace default_model is treated as "unset" so a blank
+        # picker never sends an empty model name (which Ollama rejects with a
+        # confusing error). Capabilities come from the CAPABILITIES env var —
+        # see config.py and spawn_local_agent in console/src-tauri/src/lib.rs.
+        caps = settings.capabilities_dict()
+        configured_models = caps.get("models") or []
+        default_model = (
+            (caps.get("default_model") or "").strip()
+            or (configured_models[0] if configured_models else None)
+            or "llama3.1:8b"
+        )
         model = prefs.get("name") or default_model
         options = {
             ollama_key: prefs[core_key]

@@ -1,11 +1,16 @@
 <!--
-  ResultView — embeds Gruper core's conversation message rendering style:
-  - Round-based display with agent role indicator
-  - Markdown rendering via marked + DOMPurify XSS protection (same libraries as core)
-  - Glassmorphism message bubbles matching core's agent panel cards
-  - Streaming partial output from task_progress events
+  ResultView — renders a task's live progress and final result. Fills the wide
+  master/detail pane (see +page.svelte), not the old cramped right rail.
+
+  - Round-based streaming progress from task_progress events
+  - Final output rendered with the real marked + DOMPurify pipeline (untrusted
+    model text sanitized before {@html}), with a plaintext fallback so a render
+    failure degrades to visible text rather than a blank result
+  - Copy-result button; fetch-error state distinct from "no output"
 -->
 <script lang="ts">
+  import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import { tasksStore, type ProgressLine } from '$lib/stores/tasks.js';
   import { authStore } from '$lib/stores/auth.js';
   import { OrchestratorClient } from '$lib/api/client.js';
@@ -17,64 +22,90 @@
   let progressLines = $state<ProgressLine[]>([]);
   let fetchingResult = $state(false);
   let resultText = $state<string | null>(null);
+  let fetchError = $state<string | null>(null);
+  let resultModel = $state<string | null>(null);
+  let resultDuration = $state<number | null>(null);
+  let copied = $state(false);
 
-  // Reactive: when taskId changes, look up the task in the store and fetch full
-  // result if it's in a terminal state.
+  // Reactive: when taskId changes, look up the task in the store and reset the
+  // fetched-result state so the next terminal task fetches fresh.
   $effect(() => {
     if (!taskId) {
       task = null;
       progressLines = [];
       resultText = null;
+      fetchError = null;
+      resultModel = null;
+      resultDuration = null;
       return;
     }
+    // Reset per-task fetched state on switch.
+    resultText = null;
+    fetchError = null;
+    resultModel = null;
+    resultDuration = null;
     const unsubTask = tasksStore.subscribe((s) => {
       task = s.tasks.find((t) => t.id === taskId) ?? null;
       progressLines = s.progress[taskId] ?? [];
     });
-
     return unsubTask;
   });
 
+  async function fetchResult(id: string): Promise<void> {
+    fetchingResult = true;
+    fetchError = null;
+    const { token, orchestratorUrl } = $authStore;
+    if (!token) {
+      fetchingResult = false;
+      return;
+    }
+    try {
+      const full = await new OrchestratorClient(orchestratorUrl, token).getTask(id);
+      const result = full.result as Record<string, unknown> | null;
+      resultText = (result?.output as string) ?? '';
+      resultModel = (result?.model_used as string) ?? null;
+      resultDuration = (result?.duration_ms as number) ?? null;
+    } catch (err) {
+      // Distinct from "no output": a network blip must not masquerade as an
+      // empty answer. The user gets a Retry.
+      fetchError = err instanceof Error ? err.message : String(err);
+    } finally {
+      fetchingResult = false;
+    }
+  }
+
   $effect(() => {
-    if (!task) return;
-    if (task.status === 'complete' && !resultText && !fetchingResult) {
-      fetchingResult = true;
-      const { token, orchestratorUrl } = $authStore;
-      if (!token) return;
-      const client = new OrchestratorClient(orchestratorUrl, token);
-      client
-        .getTask(task.id)
-        .then((full) => {
-          resultText = (full.result as Record<string, string>)?.output ?? null;
-        })
-        .catch(() => {
-          resultText = null;
-        })
-        .finally(() => {
-          fetchingResult = false;
-        });
+    if (task && task.status === 'complete' && resultText === null && !fetchingResult && !fetchError) {
+      fetchResult(task.id);
     }
   });
 
-  // Markdown renderer with DOMPurify, matching Gruper core's rendering pipeline.
+  // Real markdown, sanitized. marked + DOMPurify are the project's existing deps
+  // and are statically bundled (no runtime import that a strict CSP could reject
+  // into a blank result). Untrusted model output rendered with {@html} is a
+  // genuine XSS surface — DOMPurify closes it.
   function renderMarkdown(text: string): string {
-    let html: string;
     try {
-      // Dynamic import is not available in sync context; use a simple fallback
-      // that converts newlines to <br> and escapes HTML. WP-06 adds the full
-      // marked + DOMPurify pipeline with dynamic import.
-      html = text
+      const html = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
+      return DOMPurify.sanitize(html);
+    } catch {
+      return text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-        .replace(/`([^`]+)`/g, '<code class="bg-white/10 px-1 rounded text-blue-300">$1</code>')
         .replace(/\n/g, '<br>');
-    } catch {
-      html = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
-    return html;
+  }
+
+  async function copyResult(): Promise<void> {
+    if (!resultText) return;
+    try {
+      await navigator.clipboard.writeText(resultText);
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch {
+      // ignore — clipboard may be unavailable in some webview contexts
+    }
   }
 
   const STATUS_COLOUR: Record<string, string> = {
@@ -90,7 +121,7 @@
 
 {#if !taskId}
   <div class="glass-card p-8 text-center text-slate-500 text-sm">
-    Select a task to view its result.
+    Select a task to view its result — or start a new one.
   </div>
 {:else if !task}
   <div class="glass-card p-8 text-center text-slate-500 text-sm">
@@ -102,14 +133,14 @@
     <div class="flex items-start justify-between gap-2">
       <div class="min-w-0">
         <p class="text-xs text-slate-400 font-mono truncate">{task.id}</p>
-        <p class="text-sm text-white mt-0.5 line-clamp-2">{task.input?.prompt ?? '—'}</p>
+        <p class="text-sm text-white mt-0.5">{task.input?.prompt ?? '—'}</p>
       </div>
       <span class="text-xs {STATUS_COLOUR[task.status] ?? 'text-slate-400'} flex-shrink-0 font-medium">
         {task.status}
       </span>
     </div>
 
-    <div class="text-xs text-slate-500 flex gap-4">
+    <div class="text-xs text-slate-500 flex gap-4 flex-wrap">
       <span>Priority: {task.priority}</span>
       <span>Data class: {task.data_class}</span>
       <span>Timeout: {task.timeout_s}s</span>
@@ -118,11 +149,11 @@
       {/if}
     </div>
 
-    <!-- Streaming progress — mirrors Gruper core's round-by-round display -->
+    <!-- Streaming progress -->
     {#if progressLines.length > 0}
       <div>
         <p class="text-xs text-slate-400 mb-2 font-medium">Progress</p>
-        <div class="space-y-1 max-h-48 overflow-y-auto">
+        <div class="space-y-1 max-h-[40vh] overflow-y-auto">
           {#each progressLines as line}
             <div class="flex gap-2 items-start">
               <span class="text-xs text-slate-600 flex-shrink-0 w-14 text-right">
@@ -146,23 +177,43 @@
       </div>
     {/if}
 
-    <!-- Final result — Gruper core conversation bubble rendering -->
+    <!-- Final result -->
     {#if task.status === 'complete'}
       <div>
-        <p class="text-xs text-slate-400 mb-2 font-medium">
-          Result
-          {#if task.result?.model_used}
-            <span class="text-slate-500">· {task.result.model_used}</span>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs text-slate-400 font-medium">
+            Result
+            {#if resultModel ?? task.result?.model_used}
+              <span class="text-slate-500">· {resultModel ?? task.result?.model_used}</span>
+            {/if}
+            {#if (resultDuration ?? task.result?.duration_ms) != null}
+              <span class="text-slate-500">· {((resultDuration ?? task.result?.duration_ms ?? 0) / 1000).toFixed(1)}s</span>
+            {/if}
+          </p>
+          {#if resultText}
+            <button
+              onclick={copyResult}
+              class="text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 transition-colors"
+            >
+              {copied ? 'Copied ✓' : 'Copy'}
+            </button>
           {/if}
-          {#if task.result?.duration_ms}
-            <span class="text-slate-500">· {(task.result.duration_ms / 1000).toFixed(1)}s</span>
-          {/if}
-        </p>
+        </div>
 
         {#if fetchingResult}
           <div class="text-slate-500 text-sm">Fetching full result…</div>
+        {:else if fetchError}
+          <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm">
+            <p class="text-red-400">Couldn't load the result: {fetchError}</p>
+            <button
+              onclick={() => task && fetchResult(task.id)}
+              class="mt-2 text-xs px-2 py-1 rounded bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10"
+            >
+              Retry
+            </button>
+          </div>
         {:else if resultText}
-          <div class="message-bubble" role="article">
+          <div class="message-bubble markdown-body" role="article">
             <!-- eslint-disable-next-line svelte/no-at-html-tags -->
             {@html renderMarkdown(resultText)}
           </div>

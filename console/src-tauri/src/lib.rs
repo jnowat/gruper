@@ -55,11 +55,12 @@
 //! browser-dev-tab case (where the same PNA rule does not apply, since a
 //! Vite dev server is itself served from `localhost`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use regex::Regex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -68,6 +69,224 @@ const ORCHESTRATOR_HOST: &str = "127.0.0.1";
 const ORCHESTRATOR_PORT: u16 = 8080;
 const ORCHESTRATOR_URL: &str = "http://127.0.0.1:8080";
 const HEALTH_POLL_TIMEOUT_S: u64 = 15;
+
+// ─── Unified debug log sink (Desktop Hardening) ──────────────────────────────
+//
+// One bounded, in-memory ring buffer is the single sink for the whole stack. It
+// is fed by (1) the Rust/Tauri tier directly (`rust_log`), (2) structured JSON
+// lines parsed out of the orchestrator/agent sidecar stdout
+// (`ingest_sidecar_line`), and (3) the Svelte frontend via the `push_log`
+// command. The frontend reads a snapshot with `get_logs` (backfill, since a
+// Tauri event fired before the listener attaches is dropped — the same hazard
+// solved for `orchestrator-status`) and streams new entries via the `log-entry`
+// event, then filters / copies / exports them in DebugPanel.svelte. Secrets are
+// redacted HERE, before an entry is ever stored — defense in depth with the
+// Python emit-site redaction in {orchestrator,agent-runtime}/structured_log.py.
+
+const LOG_BUFFER_CAP: usize = 5000;
+const LOG_SENTINEL: u8 = 0x1e; // ASCII Record Separator; see structured_log.py
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct LogEntry {
+    ts: String,
+    level: String,
+    category: String,
+    tier: String,
+    #[serde(default)]
+    agent_id: Option<String>,
+    #[serde(default)]
+    task_id: Option<String>,
+    msg: String,
+    #[serde(default = "empty_json_object")]
+    fields: serde_json::Value,
+}
+
+fn empty_json_object() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+struct LogBuffer(Mutex<VecDeque<LogEntry>>);
+
+/// ISO-8601 UTC timestamp without pulling in chrono, via Howard Hinnant's
+/// days-from-civil algorithm. Matches the shape the Python tier emits so the
+/// frontend can sort/display every tier's entries uniformly.
+fn iso_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = dur.as_secs() as i64;
+    let millis = dur.subsec_millis();
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (hour, min, sec) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}.{millis:03}Z")
+}
+
+fn redact_str(input: &str) -> String {
+    static JWT: OnceLock<Regex> = OnceLock::new();
+    static TOKEN_QS: OnceLock<Regex> = OnceLock::new();
+    static BEARER: OnceLock<Regex> = OnceLock::new();
+    let jwt = JWT.get_or_init(|| {
+        Regex::new(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}").unwrap()
+    });
+    let token_qs =
+        TOKEN_QS.get_or_init(|| Regex::new(r#"(?i)([?&](?:token|jwt)=)[^&\s"']+"#).unwrap());
+    let bearer = BEARER.get_or_init(|| Regex::new(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+").unwrap());
+    let s = jwt.replace_all(input, "<jwt:redacted>").into_owned();
+    let s = token_qs.replace_all(&s, "${1}<redacted>").into_owned();
+    bearer.replace_all(&s, "${1}<redacted>").into_owned()
+}
+
+fn is_secret_key(key: &str) -> bool {
+    static KEY: OnceLock<Regex> = OnceLock::new();
+    KEY.get_or_init(|| {
+        Regex::new(r"(?i)(pub_?key|x25519|token_string|secret|password|priv(_?key)?|signature|jwt)")
+            .unwrap()
+    })
+    .is_match(key)
+}
+
+fn redact_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(s) => *s = redact_str(s),
+        serde_json::Value::Array(arr) => arr.iter_mut().for_each(redact_value),
+        serde_json::Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if is_secret_key(k) {
+                    *v = serde_json::Value::String("<redacted>".into());
+                } else {
+                    redact_value(v);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn log_push(app: &AppHandle, mut entry: LogEntry, emit: bool) {
+    entry.msg = redact_str(&entry.msg);
+    redact_value(&mut entry.fields);
+    if let Some(state) = app.try_state::<LogBuffer>() {
+        let mut buf = state.0.lock().unwrap();
+        while buf.len() >= LOG_BUFFER_CAP {
+            buf.pop_front();
+        }
+        buf.push_back(entry.clone());
+    }
+    if emit {
+        let _ = app.emit("log-entry", &entry);
+    }
+}
+
+/// Emit a log line from the Rust/Tauri tier itself (spawn decisions, health
+/// checks, crash-grace outcomes). Still prints to stderr so `cargo tauri dev`
+/// output is unchanged, and also lands in the unified buffer + live stream.
+fn rust_log(
+    app: &AppHandle,
+    level: &str,
+    category: &str,
+    agent_id: Option<String>,
+    msg: impl Into<String>,
+) {
+    let msg = msg.into();
+    match &agent_id {
+        Some(id) => eprintln!("[{category}:{id}] {msg}"),
+        None => eprintln!("[{category}] {msg}"),
+    }
+    log_push(
+        app,
+        LogEntry {
+            ts: iso_now(),
+            level: level.into(),
+            category: category.into(),
+            tier: "rust".into(),
+            agent_id,
+            task_id: None,
+            msg,
+            fields: empty_json_object(),
+        },
+        true,
+    );
+}
+
+/// Ingest one line of sidecar output. A sentinel-prefixed line is parsed as a
+/// structured LogEntry (preserving its level/category/task_id); anything else
+/// (a traceback, uvicorn's banner, a stray print) is wrapped verbatim as a raw
+/// 'sidecar' entry so nothing is ever lost.
+fn ingest_sidecar_line(app: &AppHandle, tier: &str, agent_id: &Option<String>, raw: &[u8]) {
+    let mut bytes = raw;
+    while matches!(bytes.last(), Some(b'\n') | Some(b'\r')) {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    if bytes.first() == Some(&LOG_SENTINEL) {
+        if let Ok(mut e) = serde_json::from_slice::<LogEntry>(&bytes[1..]) {
+            if e.ts.is_empty() {
+                e.ts = iso_now();
+            }
+            if e.tier.is_empty() {
+                e.tier = tier.to_string();
+            }
+            if e.agent_id.is_none() {
+                e.agent_id = agent_id.clone();
+            }
+            log_push(app, e, true);
+            return;
+        }
+    }
+    let text = String::from_utf8_lossy(bytes).trim().to_string();
+    if text.is_empty() {
+        return;
+    }
+    match agent_id {
+        Some(id) => eprintln!("[{tier}:{id}] {text}"),
+        None => eprintln!("[{tier}] {text}"),
+    }
+    log_push(
+        app,
+        LogEntry {
+            ts: iso_now(),
+            level: "info".into(),
+            category: "sidecar".into(),
+            tier: tier.into(),
+            agent_id: agent_id.clone(),
+            task_id: None,
+            msg: text,
+            fields: empty_json_object(),
+        },
+        true,
+    );
+}
+
+/// Snapshot the whole ring buffer (frontend backfill on DebugPanel open).
+#[tauri::command]
+fn get_logs(state: tauri::State<LogBuffer>) -> Vec<LogEntry> {
+    state.0.lock().unwrap().iter().cloned().collect()
+}
+
+/// Clear the ring buffer (the DebugPanel "Clear" button).
+#[tauri::command]
+fn clear_logs(state: tauri::State<LogBuffer>) {
+    state.0.lock().unwrap().clear();
+}
+
+/// Frontend-originated log line. Stored (redacted) but NOT re-emitted: the
+/// calling window already appended it locally, so echoing `log-entry` back
+/// would duplicate it.
+#[tauri::command]
+fn push_log(app: AppHandle, entry: LogEntry) {
+    log_push(&app, entry, false);
+}
 
 /// Holds every sidecar child process this Console instance spawned, so they
 /// can all be killed on exit. `orchestrator` is `None` if we connected to an
@@ -132,11 +351,15 @@ pub fn run() {
         .manage(LastStatus(Mutex::new(
             serde_json::json!({ "status": "checking", "url": null, "error": null }),
         )))
+        .manage(LogBuffer(Mutex::new(VecDeque::with_capacity(256))))
         .invoke_handler(tauri::generate_handler![
             get_orchestrator_status,
             spawn_local_agent,
             detect_ollama_models,
-            stop_local_agent
+            stop_local_agent,
+            get_logs,
+            clear_logs,
+            push_log
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -221,6 +444,13 @@ fn stop_local_agent(app: AppHandle, agent_id: String) -> Result<(), String> {
 
 async fn manage_orchestrator(app: AppHandle) {
     if check_health().await {
+        rust_log(
+            &app,
+            "info",
+            "sidecar",
+            None,
+            format!("found an orchestrator already answering /v1/health at {ORCHESTRATOR_URL}; using it"),
+        );
         emit_status(
             &app,
             serde_json::json!({ "status": "existing", "url": ORCHESTRATOR_URL, "error": null }),
@@ -288,24 +518,42 @@ async fn manage_orchestrator(app: AppHandle) {
     if let Some(state) = app.try_state::<SidecarState>() {
         *state.orchestrator.lock().unwrap() = Some(child);
     }
+    rust_log(
+        &app,
+        "info",
+        "sidecar",
+        None,
+        "spawned bundled orchestrator sidecar; waiting for it to become healthy",
+    );
 
-    // Drain the sidecar's stdout/stderr into the Console's own log — the
-    // orchestrator logs its own startup/migration/request activity, which
-    // is invaluable for diagnosing a "failed to start" report from a user.
+    // Drain the sidecar's stdout/stderr into the Console's unified debug log —
+    // the orchestrator logs its own startup/migration/request activity as
+    // structured JSON lines (see orchestrator/structured_log.py), which is
+    // invaluable for diagnosing a "failed to start" report from a user.
+    let app_logs = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
-                CommandEvent::Stdout(line) => {
-                    eprintln!("[orchestrator] {}", String::from_utf8_lossy(&line));
-                }
-                CommandEvent::Stderr(line) => {
-                    eprintln!("[orchestrator] {}", String::from_utf8_lossy(&line));
+                CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
+                    ingest_sidecar_line(&app_logs, "orchestrator", &None, &line);
                 }
                 CommandEvent::Error(err) => {
-                    eprintln!("[orchestrator] error: {err}");
+                    rust_log(
+                        &app_logs,
+                        "error",
+                        "sidecar",
+                        None,
+                        format!("orchestrator sidecar error: {err}"),
+                    );
                 }
                 CommandEvent::Terminated(payload) => {
-                    eprintln!("[orchestrator] exited: {:?}", payload);
+                    rust_log(
+                        &app_logs,
+                        "warn",
+                        "sidecar",
+                        None,
+                        format!("orchestrator sidecar exited: {payload:?}"),
+                    );
                     break;
                 }
                 _ => {}
@@ -323,6 +571,17 @@ async fn manage_orchestrator(app: AppHandle) {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
+    if ready {
+        rust_log(&app, "info", "sidecar", None, "local orchestrator is healthy");
+    } else {
+        rust_log(
+            &app,
+            "error",
+            "sidecar",
+            None,
+            format!("orchestrator did not become healthy within {HEALTH_POLL_TIMEOUT_S}s"),
+        );
+    }
     emit_status(
         &app,
         serde_json::json!({
@@ -425,9 +684,9 @@ async fn spawn_local_agent(
             event = rx.recv() => {
                 match event {
                     Some(CommandEvent::Stdout(line)) | Some(CommandEvent::Stderr(line)) => {
+                        ingest_sidecar_line(&app, "agent", &Some(agent_id.clone()), &line);
                         let text = String::from_utf8_lossy(&line).trim().to_string();
                         if !text.is_empty() {
-                            eprintln!("[agent:{agent_id}] {text}");
                             last_output = Some(text);
                         }
                     }
@@ -464,9 +723,16 @@ async fn spawn_local_agent(
             .unwrap()
             .insert(agent_id.clone(), child);
     }
+    rust_log(
+        &app,
+        "info",
+        "sidecar",
+        Some(agent_id.clone()),
+        "agent sidecar started; waiting for it to register and come online",
+    );
 
-    // Drain stdout/stderr into the Console's own log for the rest of the
-    // process's life, same as the orchestrator sidecar — invaluable for
+    // Drain stdout/stderr into the Console's unified debug log for the rest of
+    // the process's life, same as the orchestrator sidecar — invaluable for
     // diagnosing why a freshly-added agent never shows up as online. Also
     // emit a Tauri event on a later crash/exit so the frontend (still
     // waiting for the agent to appear in the fleet) can report a real
@@ -476,17 +742,29 @@ async fn spawn_local_agent(
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
-                    eprintln!("[agent:{agent_id}] {}", String::from_utf8_lossy(&line));
+                    ingest_sidecar_line(&app_for_task, "agent", &Some(agent_id.clone()), &line);
                 }
                 CommandEvent::Error(err) => {
-                    eprintln!("[agent:{agent_id}] error: {err}");
+                    rust_log(
+                        &app_for_task,
+                        "error",
+                        "sidecar",
+                        Some(agent_id.clone()),
+                        format!("agent sidecar error: {err}"),
+                    );
                     let _ = app_for_task.emit(
                         "agent-sidecar-exited",
                         serde_json::json!({ "agent_id": agent_id, "error": err }),
                     );
                 }
                 CommandEvent::Terminated(payload) => {
-                    eprintln!("[agent:{agent_id}] exited: {:?}", payload);
+                    rust_log(
+                        &app_for_task,
+                        "warn",
+                        "sidecar",
+                        Some(agent_id.clone()),
+                        format!("agent sidecar exited: {payload:?}"),
+                    );
                     if let Some(state) = app_for_task.try_state::<SidecarState>() {
                         state.agents.lock().unwrap().remove(&agent_id);
                     }

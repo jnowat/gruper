@@ -7,6 +7,7 @@
 <script lang="ts">
   import { authStore } from '$lib/stores/auth.js';
   import { tasksStore } from '$lib/stores/tasks.js';
+  import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
   import type { Agent, DataClass, TaskSubmitRequest } from '$lib/types.js';
 
@@ -41,6 +42,18 @@
     'scientist', 'psychologist', 'engineer',
   ];
 
+  // Reset the per-task model override when the selected agent changes, so a
+  // model pinned for one agent doesn't silently carry over to another that may
+  // not even have it installed. '' means "use the agent's default".
+  $effect(() => {
+    void agent?.id;
+    modelName = '';
+  });
+
+  const agentDefaultModel = $derived(
+    agent?.capabilities?.default_model ?? agent?.capabilities?.models?.[0] ?? '',
+  );
+
   async function handleSubmit() {
     if (!agent || !prompt.trim()) return;
     const auth = $authStore;
@@ -70,6 +83,10 @@
         timeout_s: timeoutS,
       };
       const task = await client.submitTask(body);
+      logStore.frontend('info', 'ui', `submitted task (model: ${modelName || 'agent default'})`, {
+        task_id: task.id,
+        agent_id: agent.id,
+      });
       tasksStore.prependTask(task);
       prompt = '';
       onTaskSubmitted?.(task.id);
@@ -135,16 +152,31 @@
       </div>
     </div>
 
-    <!-- Model name -->
+    <!-- Model -->
     <div>
-      <label class="block text-xs text-slate-400 mb-1" for="model">Model (blank = agent default)</label>
-      <input
-        id="model"
-        type="text"
-        bind:value={modelName}
-        placeholder={agent?.capabilities?.models?.[0] ?? 'e.g. llama3.1:8b'}
-        class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
-      />
+      <label class="block text-xs text-slate-400 mb-1" for="model">Model</label>
+      {#if agent?.capabilities?.models?.length}
+        <select
+          id="model"
+          bind:value={modelName}
+          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+        >
+          <option value="" class="bg-slate-800 text-white">
+            Agent default{agentDefaultModel ? ` (${agentDefaultModel})` : ''}
+          </option>
+          {#each agent.capabilities.models as m}
+            <option value={m} class="bg-slate-800 text-white">{m}</option>
+          {/each}
+        </select>
+      {:else}
+        <input
+          id="model"
+          type="text"
+          bind:value={modelName}
+          placeholder="e.g. llama3.1:8b"
+          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+        />
+      {/if}
     </div>
 
     <!-- Advanced parameters toggle -->

@@ -120,6 +120,11 @@
           "description": "Ollama model tags currently available on this agent, in preference order.",
           "examples": [["llama3.1:70b", "qwen2.5-coder:32b", "mistral:7b"]]
         },
+        "default_model": {
+          "type": "string",
+          "description": "Model used by default when a task does not pin one via model_preferences.name. Chosen explicitly at registration ('Add Local Agent') rather than silently defaulting to models[0]. Should be one of `models`. Optional for backward compatibility; the agent runtime falls back to models[0] when absent.",
+          "examples": ["llama3.1:70b"]
+        },
         "tools": {
           "type": "array",
           "items": {

@@ -1,13 +1,16 @@
 <!--
-  Gruper Console — main page
-  Three-pane layout: fleet sidebar | task area | analytics
-  Orchestrates the ConsoleWS connection and bridges stores to components.
+  Gruper Console — main page.
+  Master/detail layout: Fleet sidebar | Tasks list | wide detail pane (result /
+  analytics). The wide pane is where results are READ; task composition is a
+  modal ("+ New task"); a slide-over Debug panel exposes the unified log.
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { authStore } from '$lib/stores/auth.js';
   import { fleetStore } from '$lib/stores/fleet.js';
   import { tasksStore } from '$lib/stores/tasks.js';
+  import { orchestratorStore } from '$lib/stores/orchestrator.js';
+  import { wsStatus } from '$lib/stores/wsStatus.js';
   import { OrchestratorClient } from '$lib/api/client.js';
   import { ConsoleWS } from '$lib/ws/console_ws.js';
   import ConnectDialog from '$lib/components/ConnectDialog.svelte';
@@ -16,13 +19,16 @@
   import TaskComposer from '$lib/components/TaskComposer.svelte';
   import ResultView from '$lib/components/ResultView.svelte';
   import AgentAnalytics from '$lib/components/AgentAnalytics.svelte';
+  import DebugPanel from '$lib/components/DebugPanel.svelte';
 
   let ws: ConsoleWS | null = null;
   let activeAgentId = $state<string | null>(null);
   let activeTaskId = $state<string | null>(null);
-  let rightTab = $state<'compose' | 'analytics'>('compose');
+  let detailTab = $state<'result' | 'analytics'>('result');
   let loadingData = $state(false);
   let showAddAgent = $state(false);
+  let showComposer = $state(false);
+  let showDebug = $state(false);
   let agentActionError = $state<string | null>(null);
 
   const hasTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -31,6 +37,10 @@
   const agents = $derived($fleetStore);
   const tasks = $derived($tasksStore.tasks);
   const activeAgent = $derived(agents.find((a) => a.id === activeAgentId) ?? null);
+  const orch = $derived($orchestratorStore);
+  const wsState = $derived($wsStatus);
+
+  const onlineCount = $derived(agents.filter((a) => a.status !== 'offline').length);
 
   // Connect WS and load initial data whenever token becomes available.
   $effect(() => {
@@ -47,7 +57,6 @@
     ws = new ConsoleWS(auth.orchestratorUrl, token);
     ws.connect();
 
-    // REST initial load: fetch agents and tasks (WS snapshot supplements this).
     loadingData = true;
     const client = new OrchestratorClient(auth.orchestratorUrl, token);
     Promise.all([client.listAgents(), client.listTasks()])
@@ -66,20 +75,45 @@
 
   onDestroy(() => ws?.disconnect());
 
+  // Ctrl/Cmd + ` opens the debug panel (a subtle, always-available affordance
+  // alongside the header bug icon).
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        showDebug = !showDebug;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   function selectAgent(id: string) {
     activeAgentId = id;
-    // Default to the compose tab when switching agents.
-    rightTab = 'compose';
+    detailTab = 'result';
+  }
+
+  function selectTask(id: string) {
+    activeTaskId = id;
+    detailTab = 'result';
+  }
+
+  function openComposer() {
+    if (!activeAgent) return;
+    showComposer = true;
+  }
+
+  function onComposerSubmitted(taskId: string) {
+    activeTaskId = taskId;
+    detailTab = 'result';
+    showComposer = false;
   }
 
   /**
-   * Minimum-viable agent management (see ROADMAP.md WP-32.1): stops an
-   * agent this Console spawned locally and marks it offline in the fleet
-   * view. There is no orchestrator DELETE endpoint for agents, so this
-   * can't remove the row outright — the orchestrator converges to the same
-   * "offline" status on its own once it notices the WebSocket drop. A
-   * remote/manually-run agent (or one this Console didn't spawn) can't be
-   * stopped this way; that's expected, not an error to hide.
+   * Minimum-viable agent management (see ROADMAP.md WP-32.1): stops a locally-
+   * spawned agent and marks it offline. There is no orchestrator DELETE
+   * endpoint for agents, so this can't remove the row outright — the
+   * orchestrator converges to "offline" once it notices the WebSocket drop.
    */
   async function removeAgent(id: string) {
     agentActionError = null;
@@ -96,9 +130,21 @@
     }
   }
 
-  function onTaskSubmitted(taskId: string) {
-    activeTaskId = taskId;
-  }
+  // Connection indicator colours.
+  const orchDot = $derived(
+    orch.status === 'ready' || orch.status === 'existing' ? 'bg-green-500'
+    : orch.status === 'checking' ? 'bg-amber-400 animate-pulse'
+    : orch.status === 'failed' ? 'bg-red-500'
+    : 'bg-slate-600',
+  );
+  const orchLabel = $derived(
+    orch.status === 'ready' ? 'local' : orch.status === 'existing' ? 'connected' : orch.status,
+  );
+  const wsDot = $derived(
+    wsState === 'live' ? 'bg-green-500'
+    : wsState === 'connecting' || wsState === 'reconnecting' ? 'bg-amber-400 animate-pulse'
+    : 'bg-slate-600',
+  );
 </script>
 
 {#if !auth.token}
@@ -113,9 +159,21 @@
         <span class="text-xs text-slate-500">gd-0.2</span>
       </div>
       <div class="flex items-center gap-4">
-        <span class="text-xs text-slate-500">
-          {agents.filter((a) => a.status !== 'offline').length}/{agents.length} agents online
-        </span>
+        <div class="flex items-center gap-1.5" title="Local orchestrator: {orch.status}{orch.error ? ` — ${orch.error}` : ''}">
+          <span class="w-2 h-2 rounded-full {orchDot}"></span>
+          <span class="text-xs text-slate-500">orchestrator {orchLabel}</span>
+        </div>
+        <div class="flex items-center gap-1.5" title="Console WebSocket: {wsState}">
+          <span class="w-2 h-2 rounded-full {wsDot}"></span>
+          <span class="text-xs text-slate-500">live {onlineCount}/{agents.length}</span>
+        </div>
+        <button
+          onclick={() => { showDebug = true; }}
+          class="text-xs text-slate-400 hover:text-blue-400 transition-colors"
+          title="Open the debug log (Ctrl/Cmd + `)"
+        >
+          🐞 Debug
+        </button>
         <button
           onclick={() => authStore.logout()}
           class="text-xs text-slate-400 hover:text-red-400 transition-colors"
@@ -183,35 +241,43 @@
         </div>
       </aside>
 
-      <!-- Center: Task queue -->
-      <div class="flex-1 flex flex-col min-w-0 border-r border-white/5 overflow-hidden">
-        <div class="px-3 py-2 border-b border-white/5 flex items-center justify-between">
+      <!-- Middle: Tasks master list -->
+      <div class="w-72 flex-shrink-0 flex flex-col border-r border-white/5 overflow-hidden">
+        <div class="px-3 py-2 border-b border-white/5 flex items-center justify-between gap-2">
           <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Tasks</span>
-          {#if tasks.length > 0}
-            <div class="flex items-center gap-3">
-              {#if tasks.some((t) => t.status === 'failed' || t.status === 'timed_out' || t.status === 'dead_letter')}
-                <button
-                  onclick={() => tasksStore.clearFailed()}
-                  class="text-xs text-slate-500 hover:text-amber-400 transition-colors"
-                  title="Remove failed/timed-out tasks from this list (session-only — does not delete them on the orchestrator)"
-                >
-                  Clear failed
-                </button>
-              {/if}
-              <button
-                onclick={() => { activeTaskId = null; tasksStore.clearAll(); }}
-                class="text-xs text-slate-500 hover:text-red-400 transition-colors"
-                title="Clear this list (session-only — does not delete tasks on the orchestrator)"
-              >
-                Clear all
-              </button>
-            </div>
-          {/if}
+          <button
+            onclick={openComposer}
+            disabled={!activeAgent}
+            title={activeAgent ? 'Compose a new task' : 'Select an agent first'}
+            class="text-xs text-blue-400 hover:text-blue-300 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors"
+          >
+            + New task
+          </button>
         </div>
+        {#if tasks.length > 0}
+          <div class="px-3 py-1 flex items-center gap-3 border-b border-white/5">
+            {#if tasks.some((t) => t.status === 'failed' || t.status === 'timed_out' || t.status === 'dead_letter')}
+              <button
+                onclick={() => tasksStore.clearFailed()}
+                class="text-xs text-slate-500 hover:text-amber-400 transition-colors"
+                title="Remove failed/timed-out tasks from this list (session-only)"
+              >
+                Clear failed
+              </button>
+            {/if}
+            <button
+              onclick={() => { activeTaskId = null; tasksStore.clearAll(); }}
+              class="text-xs text-slate-500 hover:text-red-400 transition-colors"
+              title="Clear this list (session-only — does not delete tasks on the orchestrator)"
+            >
+              Clear all
+            </button>
+          </div>
+        {/if}
         <div class="flex-1 overflow-y-auto p-2 space-y-1">
           {#each tasks as task (task.id)}
             <button
-              onclick={() => { activeTaskId = task.id; }}
+              onclick={() => selectTask(task.id)}
               class="w-full text-left glass-card px-3 py-2 transition-all {activeTaskId === task.id ? 'border-blue-500/60' : ''}"
             >
               <div class="flex items-center justify-between gap-2">
@@ -228,24 +294,28 @@
               <p class="text-xs text-slate-600 mt-0.5 font-mono">{task.id.slice(0, 8)}…</p>
             </button>
           {:else}
-            <p class="text-xs text-slate-600 text-center py-4">
-              No tasks submitted yet.
-            </p>
+            <div class="text-center py-6 px-2 space-y-2">
+              <p class="text-xs text-slate-600">No tasks yet.</p>
+              {#if activeAgent}
+                <button onclick={openComposer} class="text-xs text-blue-400 hover:text-blue-300">
+                  + New task
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
       </div>
 
-      <!-- Right: Compose / Result / Analytics -->
-      <div class="w-[28rem] flex-shrink-0 flex flex-col overflow-hidden">
-        <!-- Tab bar -->
+      <!-- Right: wide detail pane (result / analytics) -->
+      <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
         <div class="flex border-b border-white/5">
           {#each [
-            { key: 'compose' as const, label: 'Compose' },
+            { key: 'result' as const, label: 'Result' },
             { key: 'analytics' as const, label: 'Analytics' },
           ] as tab}
             <button
-              onclick={() => { rightTab = tab.key; }}
-              class="flex-1 text-xs py-2 transition-colors {rightTab === tab.key
+              onclick={() => { detailTab = tab.key; }}
+              class="px-6 text-xs py-2 transition-colors {detailTab === tab.key
                 ? 'text-white border-b border-blue-500'
                 : 'text-slate-500 hover:text-slate-300'}"
             >
@@ -254,12 +324,9 @@
           {/each}
         </div>
 
-        <div class="flex-1 overflow-y-auto p-3 space-y-3">
-          {#if rightTab === 'compose'}
-            <TaskComposer agent={activeAgent} onTaskSubmitted={onTaskSubmitted} />
-            {#if activeTaskId}
-              <ResultView taskId={activeTaskId} />
-            {/if}
+        <div class="flex-1 overflow-y-auto p-4">
+          {#if detailTab === 'result'}
+            <ResultView taskId={activeTaskId} />
           {:else}
             <AgentAnalytics agent={activeAgent} />
           {/if}
@@ -271,5 +338,30 @@
 
   {#if showAddAgent}
     <AddAgentDialog onclose={() => { showAddAgent = false; }} />
+  {/if}
+
+  {#if showComposer && activeAgent}
+    <!-- Composer modal — task creation is a transient action, not a permanent
+         pane. Also the future home of the WP-10 sharing UI. -->
+    <div
+      class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-40 p-4"
+      onclick={(e) => { if (e.target === e.currentTarget) showComposer = false; }}
+      onkeydown={(e) => { if (e.key === 'Escape') showComposer = false; }}
+      role="presentation"
+    >
+      <div class="w-full max-w-lg max-h-[88vh] overflow-y-auto">
+        <TaskComposer agent={activeAgent} onTaskSubmitted={onComposerSubmitted} />
+        <button
+          onclick={() => (showComposer = false)}
+          class="mt-2 w-full text-xs text-slate-400 hover:text-slate-200 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  {#if showDebug}
+    <DebugPanel onclose={() => { showDebug = false; }} />
   {/if}
 {/if}

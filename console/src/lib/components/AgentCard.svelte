@@ -52,10 +52,12 @@
         </div>
 
         {#if agent.capabilities?.models?.length}
-          <p class="text-xs text-slate-500 truncate mt-0.5">
-            {agent.capabilities.models.slice(0, 2).join(', ')}
-            {#if agent.capabilities.models.length > 2}
-              +{agent.capabilities.models.length - 2}
+          {@const models = agent.capabilities.models}
+          {@const def = agent.capabilities.default_model ?? models[0]}
+          <p class="text-xs text-slate-500 truncate mt-0.5" title={`Default: ${def}\nAll: ${models.join(', ')}`}>
+            <span class="text-slate-300 font-mono">{def}</span>
+            {#if models.length > 1}
+              <span class="text-slate-600"> +{models.length - 1} more</span>
             {/if}
           </p>
         {/if}
