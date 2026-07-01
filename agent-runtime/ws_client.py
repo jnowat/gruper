@@ -253,7 +253,15 @@ class AgentWSClient:
 
     def _model_and_options(self, task_input: dict) -> tuple[str, dict]:
         prefs = task_input.get("model_preferences") or {}
-        model = prefs.get("name") or "llama3.1:8b"
+        # Fall back to this agent's own configured capabilities (set via the
+        # CAPABILITIES env var — see config.py and, for a Console-spawned
+        # sidecar, spawn_local_agent in console/src-tauri/src/lib.rs) rather
+        # than a hardcoded tag. Registering with detected models is worthless
+        # if task execution ignores them and always reaches for the same
+        # hardcoded default regardless of what's actually installed.
+        configured_models = settings.capabilities_dict().get("models") or []
+        default_model = configured_models[0] if configured_models else "llama3.1:8b"
+        model = prefs.get("name") or default_model
         options = {
             ollama_key: prefs[core_key]
             for core_key, ollama_key in self._OPTION_MAP.items()

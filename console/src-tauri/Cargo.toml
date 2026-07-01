@@ -29,9 +29,10 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # WP-32: async TCP + timers for the sidecar health check (see check_health in
-# lib.rs) — minimal feature set, no full runtime/macros (tauri's own async
-# runtime already drives execution; we only need the I/O primitives).
-tokio = { version = "1", features = ["net", "io-util", "time"] }
+# lib.rs) — tauri's own async runtime already drives execution, so no "rt"
+# feature is needed. "macros" is required for tokio::select!/tokio::pin!,
+# used by spawn_local_agent's early-crash grace-period check.
+tokio = { version = "1", features = ["net", "io-util", "time", "macros"] }
 
 [profile.release]
 panic = "abort"
