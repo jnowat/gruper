@@ -103,9 +103,9 @@
 
       <button class="w-full text-left" onclick={onclick}>
         <p class="text-xs mt-0.5 truncate">
-          {#if model}<span class="font-mono text-slate-300">{model}</span>{/if}
-          {#if model && models.length > 1}<span class="text-slate-600"> +{models.length - 1}</span>{/if}
-          {#if role}<span class="text-blue-300">{model ? ' · ' : ''}{role}</span>{/if}
+          {#if role}<span class="text-blue-300 font-medium">{role}</span>{/if}
+          {#if role && model}<span class="text-slate-600"> · </span>{/if}
+          {#if model}<span class="font-mono text-slate-500">{model}</span>{#if models.length > 1}<span class="text-slate-600"> +{models.length - 1}</span>{/if}{/if}
           {#if !model && !role}<span class="text-slate-600">no model</span>{/if}
         </p>
         <p class="text-xs text-slate-600 mt-0.5">

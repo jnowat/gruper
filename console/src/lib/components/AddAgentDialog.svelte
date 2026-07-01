@@ -34,6 +34,7 @@
   import { fleetStore } from '$lib/stores/fleet.js';
   import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
+  import { friendlyName } from '$lib/agentDisplay.js';
   import type { Agent, AgentCapabilities } from '$lib/types.js';
 
   let { onclose }: { onclose: () => void } = $props();
@@ -44,17 +45,16 @@
   const SUGGESTED_MODEL = 'llama3.1';
   const AGENT_ONLINE_TIMEOUT_MS = 20_000;
 
-  let name = $state('');
-  let nameEdited = $state(false);
+  // Generate the agent's identity once so the suggested name is stable and so
+  // the same key is used at registration. A memorable name ("Sage") beats a
+  // wall of "Local Agent" / "gemma3 · analyst"; the role and model show as the
+  // agent's subtitle everywhere else.
+  const agentPubkey = generateRandomPubkey();
+  const suggestedName = friendlyName(agentPubkey);
+
+  let name = $state(suggestedName);
   let ollamaUrl = $state('http://localhost:11434');
   let role = $state('analyst');
-
-  // A friendly model label for naming: drop the ":tag" and registry path, so
-  // "gemma3:4b" → "gemma3", "library/llama3.1:8b" → "llama3.1".
-  function prettyModel(m: string): string {
-    const base = m.split(':')[0];
-    return base.includes('/') ? base.slice(base.lastIndexOf('/') + 1) : base;
-  }
 
   type Step = 'form' | 'registering' | 'spawning' | 'waiting' | 'done';
   let step = $state<Step>('form');
@@ -75,15 +75,6 @@
     } else if (!detectedModels.includes(defaultModel)) {
       defaultModel = detectedModels[0];
     }
-  });
-
-  // Suggest a distinguishable name (model · role) so a fleet of agents isn't a
-  // wall of "Local Agent". Auto-fills the Name field until the user edits it.
-  const suggestedName = $derived(
-    defaultModel ? `${prettyModel(defaultModel)} · ${role}` : `${role} agent`,
-  );
-  $effect(() => {
-    if (!nameEdited) name = suggestedName;
   });
 
   let error = $state<string | null>(null);
@@ -350,7 +341,7 @@
       logStore.frontend('info', 'ui', `registering agent "${name.trim() || suggestedName}" (default model ${capabilities.default_model})`);
       agent = await client.registerAgent({
         name: name.trim() || suggestedName,
-        pubkey: generateRandomPubkey(),
+        pubkey: agentPubkey,
         capabilities,
         runtime_version: RUNTIME_VERSION,
       });
@@ -522,12 +513,11 @@
           id="agent-name"
           type="text"
           bind:value={name}
-          oninput={() => { nameEdited = true; }}
           placeholder={suggestedName}
           class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         />
         <p class="text-xs mt-1 text-slate-500">
-          How this agent shows up in the Fleet — pick something you can tell apart from your other agents.
+          A friendly name so you can tell this agent apart{#if defaultModel}{' '}from your others. Its model ({defaultModel}) and role show as details.{:else}.{/if}
         </p>
       </div>
 
