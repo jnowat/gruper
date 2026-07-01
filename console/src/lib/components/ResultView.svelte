@@ -41,6 +41,23 @@
   const isTerminal = $derived(task ? TERMINAL.has(task.status) : false);
   const showProgress = $derived(userToggledProgress ?? !isTerminal);
 
+  // The streaming output so far, as one growing block (reads more naturally than
+  // a jumpy list of per-chunk bubbles).
+  const streamedText = $derived(progressLines.map((l) => l.text).join(''));
+
+  // Result metrics, preferring the freshly-fetched full result and falling back
+  // to whatever the task_complete event carried.
+  const mModel = $derived(resultModel ?? task?.result?.model_used ?? null);
+  const mDurationMs = $derived(resultDuration ?? task?.result?.duration_ms ?? null);
+  const mTokens = $derived(resultTokens ?? task?.result?.tokens_used ?? null);
+  const mTps = $derived(resultTps ?? task?.result?.tokens_per_sec ?? null);
+
+  let streamEl = $state<HTMLDivElement | null>(null);
+  $effect(() => {
+    void streamedText;
+    if (streamEl && showProgress) streamEl.scrollTop = streamEl.scrollHeight;
+  });
+
   $effect(() => {
     if (!taskId) {
       task = null;
@@ -104,7 +121,10 @@
   const M_CLOSE = '@@';
 
   function looksLikeMath(s: string): boolean {
-    return /[\\^_{}]/.test(s) || /\\?(frac|sqrt|sum|int|alpha|beta|gamma|theta|text|mathrm|cdot|times|approx|leq|geq|infty)/.test(s);
+    return (
+      /[\\^_{}]/.test(s) ||
+      /\\?(frac|sqrt|sum|int|prod|lim|alpha|beta|gamma|delta|theta|lambda|sigma|omega|pi|text|mathrm|mathbf|cdot|cdots|ldots|times|div|pm|mp|approx|neq|leq|geq|infty|partial|nabla|vec|hat|bar|dot|rightarrow|leftarrow|to|forall|exists|in|subset)/.test(s)
+    );
   }
 
   function extractMath(text: string, store: MathItem[]): string {
@@ -113,7 +133,10 @@
       store.push({ tex: tex.trim(), display });
       return `${M_OPEN}${idx}${M_CLOSE}`;
     };
-    let out = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, t) => push(t, true));
+    // \begin{env}...\end{env} environments (align, equation, matrix, …) render
+    // as display math; pass the whole block to KaTeX (throwOnError:false).
+    let out = text.replace(/\\begin\{([a-zA-Z*]+)\}[\s\S]+?\\end\{\1\}/g, (m) => push(m, true));
+    out = out.replace(/\$\$([\s\S]+?)\$\$/g, (_m, t) => push(t, true));
     out = out.replace(/\\\[([\s\S]+?)\\\]/g, (_m, t) => push(t, true));
     out = out.replace(/\\\(([\s\S]+?)\\\)/g, (_m, t) => push(t, false));
     // Inline $...$ — conservative: single line and must look like math, so
@@ -217,39 +240,32 @@
       {/if}
     </div>
 
-    <!-- Streaming progress (collapsible) -->
+    <!-- Streaming progress (collapsible, compact, stays out of the way) -->
     {#if progressLines.length > 0 || task.status === 'running'}
       <div>
         <button
           type="button"
           onclick={() => (userToggledProgress = !showProgress)}
-          class="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 mb-2 font-medium"
+          class="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
         >
           <span class="inline-block w-3">{showProgress ? '▾' : '▸'}</span>
-          Progress{#if progressLines.length}<span class="text-slate-600"> ({progressLines.length})</span>{/if}
+          Progress
+          {#if task.status === 'running'}
+            <span class="text-amber-400/80 progress-pulse">· streaming…</span>
+          {:else if progressLines.length}
+            <span class="text-slate-600">· {progressLines.length} chunks</span>
+          {/if}
         </button>
         {#if showProgress}
-          {#if progressLines.length > 0}
-            <div class="space-y-1 max-h-[32vh] overflow-y-auto">
-              {#each progressLines as line}
-                <div class="flex gap-2 items-start">
-                  <span class="text-xs text-slate-600 flex-shrink-0 w-14 text-right">
-                    {(line.ts / 1000).toFixed(1)}s
-                  </span>
-                  <div class="message-bubble flex-1 text-xs py-1">
-                    {#if line.step}
-                      <span class="text-blue-400 font-medium">[{line.step}]</span>
-                      {' '}
-                    {/if}
-                    {line.text || '…'}
-                  </div>
-                </div>
-              {/each}
-            </div>
+          {#if streamedText}
+            <div
+              bind:this={streamEl}
+              class="mt-1.5 max-h-[20vh] overflow-y-auto text-xs text-slate-400 font-mono whitespace-pre-wrap break-words bg-black/20 border border-white/5 rounded-lg p-2"
+            >{streamedText}</div>
           {:else}
-            <div class="flex items-center gap-2 text-sm text-amber-400 progress-pulse">
-              <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-              Running — waiting for progress updates…
+            <div class="mt-1.5 flex items-center gap-2 text-xs text-amber-400 progress-pulse">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>
+              waiting for the agent to start…
             </div>
           {/if}
         {/if}
@@ -260,21 +276,7 @@
     {#if task.status === 'complete'}
       <div>
         <div class="flex items-center justify-between mb-2 gap-2">
-          <p class="text-xs text-slate-400 font-medium min-w-0 truncate">
-            Result
-            {#if resultModel ?? task.result?.model_used}
-              <span class="text-slate-500">· {resultModel ?? task.result?.model_used}</span>
-            {/if}
-            {#if (resultDuration ?? task.result?.duration_ms) != null}
-              <span class="text-slate-500">· {((resultDuration ?? task.result?.duration_ms ?? 0) / 1000).toFixed(1)}s</span>
-            {/if}
-            {#if (resultTokens ?? task.result?.tokens_used) != null}
-              <span class="text-slate-500">· {resultTokens ?? task.result?.tokens_used} tok</span>
-            {/if}
-            {#if (resultTps ?? task.result?.tokens_per_sec) != null}
-              <span class="text-slate-500">· {resultTps ?? task.result?.tokens_per_sec} tok/s</span>
-            {/if}
-          </p>
+          <p class="text-sm text-slate-300 font-medium">Result</p>
           {#if resultText}
             <button
               onclick={copyResult}
@@ -282,6 +284,22 @@
             >
               {copied ? 'Copied ✓' : 'Copy'}
             </button>
+          {/if}
+        </div>
+
+        <!-- Metric pills — tokens/sec is the headline speed number. -->
+        <div class="flex flex-wrap gap-1.5 mb-3">
+          {#if mModel}
+            <span class="text-xs font-mono text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{mModel}</span>
+          {/if}
+          {#if mDurationMs != null}
+            <span class="text-xs text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{(mDurationMs / 1000).toFixed(1)}s</span>
+          {/if}
+          {#if mTokens != null}
+            <span class="text-xs text-slate-300 bg-white/5 border border-white/10 rounded px-2 py-0.5">{mTokens.toLocaleString()} tokens</span>
+          {/if}
+          {#if mTps != null}
+            <span class="text-xs font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded px-2 py-0.5">{mTps} tok/s</span>
           {/if}
         </div>
 

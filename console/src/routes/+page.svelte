@@ -11,6 +11,7 @@
   import { tasksStore } from '$lib/stores/tasks.js';
   import { orchestratorStore } from '$lib/stores/orchestrator.js';
   import { wsStatus } from '$lib/stores/wsStatus.js';
+  import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
   import { ConsoleWS } from '$lib/ws/console_ws.js';
   import ConnectDialog from '$lib/components/ConnectDialog.svelte';
@@ -140,6 +141,20 @@
     }
   }
 
+  async function renameAgent(id: string, name: string) {
+    agentActionError = null;
+    const token = authStore.getToken();
+    if (!token) return;
+    try {
+      const client = new OrchestratorClient(authStore.getOrchestratorUrl(), token);
+      await client.renameAgent(id, name);
+      fleetStore.rename(id, name);
+      logStore.frontend('info', 'ui', `renamed agent to "${name}"`, { agent_id: id });
+    } catch (err) {
+      agentActionError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   // Connection indicator colours.
   const orchDot = $derived(
     orch.status === 'ready' || orch.status === 'existing' ? 'bg-green-500'
@@ -227,6 +242,7 @@
               selected={agent.id === activeAgentId}
               onclick={() => selectAgent(agent.id)}
               onRemove={() => removeAgent(agent.id)}
+              onRename={(name) => renameAgent(agent.id, name)}
             />
           {/each}
           {#if agents.length === 0 && !loadingData}
@@ -339,7 +355,35 @@
 
         <div class="flex-1 overflow-y-auto p-4">
           {#if detailTab === 'result'}
-            <ResultView taskId={activeTaskId} agentName={activeTaskAgentName} />
+            {#if agents.length === 0}
+              <div class="glass-card p-8 text-center space-y-3 max-w-md mx-auto mt-8">
+                <p class="text-white text-sm font-medium">Welcome to Gruper</p>
+                <p class="text-xs text-slate-400">
+                  Add your first local agent to get started. You'll need
+                  <a href="https://ollama.ai" target="_blank" rel="noreferrer" class="text-blue-400 hover:text-blue-300 underline">Ollama</a>
+                  running with at least one model pulled.
+                </p>
+                <button
+                  onclick={() => { showAddAgent = true; }}
+                  class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                >
+                  + Add your first agent
+                </button>
+              </div>
+            {:else if !activeTaskId}
+              <div class="glass-card p-8 text-center space-y-3 max-w-md mx-auto mt-8">
+                <p class="text-white text-sm font-medium">No task selected</p>
+                <p class="text-xs text-slate-400">Pick a task from the list, or start a new one — pick which agent to send it to, type a prompt, and submit.</p>
+                <button
+                  onclick={openComposer}
+                  class="bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+                >
+                  + New task
+                </button>
+              </div>
+            {:else}
+              <ResultView taskId={activeTaskId} agentName={activeTaskAgentName} />
+            {/if}
           {:else if detailTab === 'roundtable'}
             <RoundTable {agents} />
           {:else}

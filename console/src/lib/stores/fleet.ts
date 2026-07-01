@@ -35,6 +35,13 @@ function createFleetStore() {
       });
     },
 
+    /** Update an agent's display name in place (after a successful rename). */
+    rename(agentId: string, name: string) {
+      store.update((agents) =>
+        agents.map((a) => (a.id === agentId ? { ...a, name } : a)),
+      );
+    },
+
     /** Mark all agents offline (used on WS disconnect so UI reflects reality). */
     markAllOffline() {
       store.update((agents) =>

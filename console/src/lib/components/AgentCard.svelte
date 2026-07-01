@@ -1,16 +1,19 @@
 <script lang="ts">
   import type { Agent } from '$lib/types.js';
+  import { agentColor, agentInitials, agentModel, agentRole } from '$lib/agentDisplay.js';
 
   let {
     agent,
     selected = false,
     onclick,
     onRemove,
+    onRename,
   }: {
     agent: Agent;
     selected?: boolean;
     onclick?: () => void;
     onRemove?: () => void;
+    onRename?: (name: string) => void;
   } = $props();
 
   const STATUS_DOTS: Record<string, string> = {
@@ -30,59 +33,85 @@
   });
 
   const models = $derived(agent.capabilities?.models ?? []);
-  const defaultModel = $derived(agent.capabilities?.default_model ?? models[0] ?? null);
-  const role = $derived(agent.capabilities?.roles?.[0] ?? null);
+  const model = $derived(agentModel(agent));
+  const role = $derived(agentRole(agent));
+  const color = $derived(agentColor(agent.id));
+  const initials = $derived(agentInitials(agent.name));
+
+  let editing = $state(false);
+  let draft = $state('');
+  function startEdit() {
+    draft = agent.name;
+    editing = true;
+  }
+  function commit() {
+    const name = draft.trim();
+    editing = false;
+    if (name && name !== agent.name) onRename?.(name);
+  }
 </script>
 
 <!--
-  Not a single <button> wrapping everything (as before onRemove existed) —
-  nesting a "remove" button inside the card's own button would be invalid
-  HTML (buttons can't nest) and would need stopPropagation gymnastics to
-  keep a click on remove from also selecting the card. A group container
-  with two sibling buttons avoids both problems.
+  Sibling buttons in a group container (not a wrapping <button>) so the card can
+  hold its own action buttons (rename, remove) without invalid nested buttons.
 -->
 <div
-  class="group w-full glass-card p-3 transition-all duration-150 {selected ? 'border-blue-500/60 bg-blue-500/10' : ''}"
+  class="group w-full glass-card p-2.5 transition-all duration-150 {selected ? 'border-blue-500/60 bg-blue-500/10' : ''}"
 >
   <div class="flex items-start gap-2">
-    <button class="flex-1 min-w-0 text-left flex items-start gap-2" onclick={onclick}>
-      <!-- Status dot -->
-      <span class="mt-1 flex-shrink-0 w-2 h-2 rounded-full {STATUS_DOTS[agent.status] ?? 'bg-slate-500'}"></span>
+    <!-- Colour+initials avatar — the fastest way to tell agents apart. -->
+    <span
+      class="mt-0.5 flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-xs font-semibold text-white relative"
+      style="background-color: {color}"
+      title={agent.status}
+    >
+      {initials}
+      <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-slate-900 {STATUS_DOTS[agent.status] ?? 'bg-slate-500'}"></span>
+    </span>
 
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center justify-between gap-1">
-          <span class="text-sm font-medium text-white truncate">{agent.name}</span>
-          <span class="text-xs text-slate-400 status-{agent.status} flex-shrink-0">{agent.status}</span>
+    <div class="min-w-0 flex-1">
+      {#if editing}
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          bind:value={draft}
+          onblur={commit}
+          onkeydown={(e) => { if (e.key === 'Enter') commit(); else if (e.key === 'Escape') editing = false; }}
+          autofocus
+          class="w-full bg-white/10 border border-blue-500/50 rounded px-1.5 py-0.5 text-sm text-white focus:outline-none"
+        />
+      {:else}
+        <div class="flex items-center gap-1">
+          <button class="min-w-0 text-left flex-1" onclick={onclick}>
+            <span class="text-sm font-medium text-white truncate block">{agent.name}</span>
+          </button>
+          {#if onRename}
+            <button
+              onclick={startEdit}
+              title="Rename this agent"
+              class="flex-shrink-0 text-slate-600 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+            >✎</button>
+          {/if}
+          {#if onRemove}
+            <button
+              onclick={onRemove}
+              title="Stop this agent (if managed by this Console) and mark it offline"
+              class="flex-shrink-0 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+            >✕</button>
+          {/if}
         </div>
+      {/if}
 
-        {#if defaultModel || role}
-          <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-            {#if defaultModel}
-              <span
-                class="text-xs font-mono text-slate-200 bg-white/5 border border-white/10 rounded px-1.5 py-0.5 truncate max-w-full"
-                title={`Default model: ${defaultModel}${models.length > 1 ? `\nAlso installed: ${models.join(', ')}` : ''}`}
-              >
-                {defaultModel}{#if models.length > 1}<span class="text-slate-500"> +{models.length - 1}</span>{/if}
-              </span>
-            {/if}
-            {#if role}
-              <span class="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{role}</span>
-            {/if}
-          </div>
-        {/if}
-
-        <p class="text-xs text-slate-600 mt-1">seen {lastSeenLabel}</p>
-      </div>
-    </button>
-
-    {#if onRemove}
-      <button
-        onclick={onRemove}
-        title="Stop this agent (if it's managed by this Console) and mark it offline"
-        class="flex-shrink-0 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1"
-      >
-        ✕
+      <button class="w-full text-left" onclick={onclick}>
+        <p class="text-xs mt-0.5 truncate">
+          {#if model}<span class="font-mono text-slate-300">{model}</span>{/if}
+          {#if model && models.length > 1}<span class="text-slate-600"> +{models.length - 1}</span>{/if}
+          {#if role}<span class="text-blue-300">{model ? ' · ' : ''}{role}</span>{/if}
+          {#if !model && !role}<span class="text-slate-600">no model</span>{/if}
+        </p>
+        <p class="text-xs text-slate-600 mt-0.5">
+          <span class="status-{agent.status}">{agent.status}</span> · seen {lastSeenLabel}
+        </p>
       </button>
-    {/if}
+    </div>
   </div>
 </div>
