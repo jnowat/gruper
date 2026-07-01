@@ -1,10 +1,10 @@
 ---
 title: "Gruper Distributed — AI Workforce Platform (Technical Specification)"
 working_name: "Gruper Distributed (companion extension of Gruper core)"
-spec_version: "0.2 — Design Draft"
+spec_version: "0.2.1 — Design Draft (desktop-first alignment pass)"
 product_status: "Pre-release / Pre-v1 — no v1.0 until the first stable release ships"
-core_baseline: "Gruper v0.4.5 (single-file local multi-agent conversation system)"
-date: "2026-06-27"
+core_baseline: "Gruper v0.4.5 (single-file local multi-agent conversation system — now the legacy/standalone fallback tier; see note below)"
+date: "2026-07-01"
 owner: "Prime User — Stelminado, LLC"
 related_projects:
   - "Gruper core (Gruper.html — single-file local multi-agent conversation system, v0.4.5)"
@@ -32,6 +32,8 @@ This project uses a pre-release milestone track to stay honest:
 All version numbers in this document refer to pre-1.0 milestones. The roadmap (§11) is built toward that finish line, not from it.
 
 > **Working name:** "Gruper Distributed" is the working name through the pre-release track. Final branding decisions happen closer to v1.0. See the reflection appendix for alternatives.
+
+> **Positioning note (added 2026-07-01):** Gruper Distributed is now the project's primary forward-looking direction — `ROADMAP.md` and `README.md` are both organized around it, and the desktop-first pivot (`gd-0.2.x`, WP-30/31/32) is code-complete and Linux-validated. Gruper core (`Gruper.html`) is not deprecated — it remains a stable, fully maintained, zero-dependency single-file tier for anyone who wants six agents on one machine with no install step — but it is now positioned as the **legacy/standalone fallback**, not the tier new distributed capability lands on. New feature work (cross-machine relay, cross-owner sharing, AWS burst, the Manager Console) happens in Distributed; core receives maintenance and dependency upkeep only. See the desktop-first alignment below (§5.1, §9) for what changed in this pass.
 
 ---
 
@@ -317,13 +319,17 @@ The orchestrator is the registry, dispatcher, and auditor. It is the relay that 
 
 ### 5.1 Recommended stack
 
+**Desktop-first update (2026-07-01):** the table below reflects the pivot landed in `gd-0.2.x` (WP-30/31/32, see `ROADMAP.md`) — SQLite is the *default* backend, not a footnote, and Docker/PostgreSQL are reserved for the server tier. This closes the "companion spec not yet desktop-first" item that was open in `ROADMAP.md`'s Known Technical Debt table.
+
 | Concern | Pre-1.0 choice | Rationale |
 |---------|----------------|-----------|
 | Core service | **Python + FastAPI** for early milestones; **Rust (axum/tonic) port of hot paths** as load and security review demand | Fastest path to a working cross-network demo; Python's agent ecosystem velocity; Rust where memory safety and performance matter — consistent with the prototype-then-harden discipline |
 | Transport | **WSS** (WebSocket over TLS) for agent connections; gRPC optional later | Universally NAT/firewall-friendly; straightforward to implement and debug |
-| Task queue | **PostgreSQL** (`SKIP LOCKED` / `LISTEN-NOTIFY`) to start; Redis if throughput demands | One durable dependency, auditable, no premature infrastructure |
-| Database | **PostgreSQL** (multi-user). **SQLite + Litestream** for single-user self-host. | JSONB for capability queries; easy Docker Compose self-host |
-| Deployment | **Docker Compose** on a cheap VPS or an always-on PC | One-command self-host; no managed-cloud lock-in |
+| Task queue | **SQLite** (single-writer serialized claim, WAL mode) by default; **PostgreSQL** (`SKIP LOCKED` / `LISTEN-NOTIFY`) for the server tier; Redis if throughput ever demands it | Desktop tier needs no queue server at all; PostgreSQL's richer locking is reserved for genuinely concurrent multi-agent server deployments |
+| Database | **SQLite is the default** (embedded file, `orchestrator.db`) — no server to install, matches the agent runtime's own `agent.db` convention. **PostgreSQL is opt-in**, selected via a `postgresql://` `DATABASE_URL`, for the multi-user/server tier where its `JSONB` query power and concurrency matter. Both dialects pass the same test suite and expose identical wire behavior (`orchestrator/db/`). | Zero-config desktop by default; full multi-user power still available, one environment variable away |
+| Deployment | **Desktop (default):** no deployment step at all — a bundled/native orchestrator process auto-starts as a Tauri sidecar and auto-generates its own JWT secret and SQLite file on first run. **Server (advanced):** Docker Compose + PostgreSQL on a cheap VPS or an always-on PC, for multi-user/production hosting. | One-command desktop experience for the primary solo-user audience; one-command self-host still available for anyone who needs the server tier |
+
+Both tiers speak the same wire contracts (`spec/contracts/`) — the tier is a storage/runtime choice below the API line; agents and consoles cannot tell which backend the orchestrator uses.
 
 One orchestrator instance comfortably coordinates dozens to low-hundreds of agents — well beyond the 10–20-worker target scale.
 
@@ -503,7 +509,7 @@ For pharma and biotech users processing regulated or patient-adjacent data, E2E 
 `id, ts, actor_id, action, subject_id, payload_hash, prev_hash`
 Hash-chaining (`prev_hash` references the hash of the prior event) provides tamper-evidence without a blockchain — this is the compliance record for LLC bookkeeping, pharma audit trails, and observatory run logs.
 
-**Storage:** PostgreSQL + JSONB centrally for query power; SQLite per agent for its local queue and offline buffer. Artifact bytes go to object storage or are returned by reference (presigned URL / local HTTP server), not inlined past a configurable size threshold — see OQ-4.
+**Storage:** SQLite is the orchestrator's default store (desktop tier, zero-config, matches the agent's own per-agent SQLite offline queue); PostgreSQL + JSONB is available as an opt-in for the server tier's query power and multi-user concurrency. Artifact bytes go to object storage or are returned by reference (presigned URL / local HTTP server), not inlined past a configurable size threshold — see OQ-4.
 
 ---
 
@@ -514,14 +520,14 @@ Hash-chaining (`prev_hash` references the hash of the prior event) provides tamp
 | Desktop UI / installer | **Tauri v2 + Svelte 5 + Tailwind** | Existing expertise (SteloPTC); native feel, small binary, Rust backend available when needed |
 | Agent conversation view in console | **Embed Gruper core's conversation UI** | Reuse six months of debugged multi-agent UX, analytics, and keyboard shortcuts rather than rebuilding |
 | Agent runtime core | **Python agent loop first; Rust (PyO3 bridge or port) for sandbox and comms hardening** | Python = fastest agent-framework iteration; Rust where memory safety matters — prototype-then-harden |
-| Orchestrator | **FastAPI + PostgreSQL first; Rust (axum/tonic) port of registry and dispatch hot paths** | Quickest working cross-network demo; harden incrementally under load and security review |
+| Orchestrator | **FastAPI; SQLite by default (desktop), PostgreSQL opt-in via `DATABASE_URL` (server tier); Rust (axum/tonic) port of registry and dispatch hot paths later** | Zero-config desktop by default (shipped in WP-30); PostgreSQL still available for multi-user/production; harden incrementally under load and security review |
 | LLM inference | **Ollama-first** (same local endpoint and parameter conventions as Gruper core); cloud fallback optional and explicit | Privacy, cost control, offline capable; consistent with existing stack |
 | Workflow automation | **n8n (existing) + native agent graphs** | Don't rebuild working automation; agents become powerful reasoning nodes inside existing n8n flows |
 | Containerization | **Docker, multi-arch (linux/amd64 + linux/arm64; CPU + CUDA variants)** | AWS, VPS, desktop sandbox, and NUC/Beelink consistency |
 | LAN discovery | **mDNS (Bonjour / Avahi)** | Zero-config local clusters; no configuration required |
 | Transport | **WSS now; gRPC and WebRTC/QUIC as later optimizations** | Reliable universal relay first; direct P2P only after relay path is proven in production |
 | Identity / auth | **ed25519 keypairs + signed capability tokens (JWT or biscuit)** | Strong identity, federation-friendly, owner-sovereign, no third-party auth dependency |
-| Storage | **Central PostgreSQL + per-agent SQLite** | Query power and JSONB flexibility centrally; privacy and offline buffering at the edge |
+| Storage | **SQLite by default (orchestrator + per-agent), PostgreSQL opt-in centrally for the server tier** | Zero-config desktop by default; JSONB query power and multi-user concurrency still available one env var away |
 
 **Phased tech posture:** prototype the full cross-network path in Python to reach a working Locale 1 → Locale 2 demo as fast as possible. Port security-critical and high-throughput components to Rust once the relay model is validated in production. Add direct P2P, federation, and gRPC only after the WSS relay path is solid.
 
@@ -696,7 +702,7 @@ No public trustless marketplace. No blockchain incentives. Keep the trust model 
 
 *Gruper Distributed fully incorporates the requirement that the system is not limited to one's own network. It enables AWS agents and permissioned assignment of agents on other users' computers — the Locale 1 ↔ Locale 2 case, the pharma lab cross-site case, the astronomy observatory remote case — forming a practical, auditable, owner-sovereign distributed computing fabric for AI managers and workers. It remains explicitly pre-v1 until the first stable release ships.*
 
-**End of specification — Design Draft `gd-0.2`**
+**End of specification — Design Draft `gd-0.2.1` (desktop-first alignment pass, 2026-07-01)**
 
 ---
 ---

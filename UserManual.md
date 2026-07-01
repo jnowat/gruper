@@ -3,6 +3,8 @@
 **Version:** 0.4.5 — Streamlined UX
 **Application:** `Gruper.html` (single-file, open in any modern browser)
 
+> **Note:** This manual covers **Gruper Core** (`Gruper.html`) — the stable, single-file, zero-dependency tier. Core is now positioned as the project's **legacy/standalone fallback**: fully maintained, but new capability (multi-machine agent fleets, cross-owner sharing, cloud burst) is being built in **Gruper Distributed**, a companion desktop console + orchestrator. If you need agents running on more than one machine, or shared with another person, see [`GruperDistributedSpec.md`](GruperDistributedSpec.md) and [`ROADMAP.md`](ROADMAP.md) instead. Everything below still applies unchanged if you just want six local agents with no install step.
+
 ---
 
 ## Table of Contents
@@ -539,4 +541,4 @@ External libraries (Chart.js and DOMPurify) are loaded from jsDelivr CDN on firs
 
 *For issues, questions, or feature requests, open an issue at [github.com/jnowat/gruper/issues](https://github.com/jnowat/gruper/issues).*
 
-*See also: [README.md](README.md) for quick start · [CHANGELOG.md](CHANGELOG.md) for version history · [ROADMAP.md](ROADMAP.md) for planned work*
+*See also: [README.md](README.md) for quick start · [CHANGELOG.md](CHANGELOG.md) for version history · [ROADMAP.md](ROADMAP.md) for planned work · [GruperDistributedSpec.md](GruperDistributedSpec.md) for the multi-machine / cross-owner successor tier*

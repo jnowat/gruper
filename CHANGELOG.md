@@ -2,6 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+> **Scope note (added 2026-07-01):** entries below `v0.4.5` track **Gruper Core** (`Gruper.html`) only. Starting with the entry immediately below, this changelog also tracks **Gruper Distributed** (`spec/`, `orchestrator/`, `agent-runtime/`, `console/`) — the companion desktop console + orchestrator system that is now the project's primary forward direction. Gruper Core remains the stable, maintained, single-file legacy/fallback tier; its own version stays `0.4.5` unless noted.
+
+---
+
+## Gruper Distributed — `gd-0.1` → `gd-0.2.x` (2026-06-27 → 2026-07-01) — Foundations Through Desktop Hardening
+
+This is the first changelog entry for Gruper Distributed. In five days the project went from a design spec to a code-complete desktop-first stack (Console + Orchestrator + Agent, SQLite by default, no Docker required) validated end-to-end on Linux, plus a detailed Phase 2 (cross-network sharing) plan. **No Gruper Core version bump** — `Gruper.html` stayed at `v0.4.5` throughout; see its own maintenance entry below for the small number of core-adjacent doc fixes made alongside this work.
+
+**Phase 0 — Foundations (`gd-0.1`) — complete:**
+- ADDED: `spec/contracts/` — OpenAPI 3.1 REST/WS API (17 endpoints), WSS message schema (16 message types), 5 versioned JSON Schema 2020-12 data models, and the Gruper-core-to-distributed parameter mapping doc (WP-01)
+- ADDED: Skeleton orchestrator — FastAPI + PostgreSQL 16 + Docker Compose, JWT auth, agent registration/heartbeat, watchdog for stale agents (WP-02)
+- RESOLVED: OQ-1 (custom ReAct agent loop) and OQ-2 (Pattern A — shared multi-tenant orchestrator) open questions
+
+**Phase 1 — Walking Skeleton (`gd-0.2`) — code complete, automated E2E green:**
+- ADDED: Agent runtime desktop MVP — outbound WSS client with Gruper-core-matching exponential backoff (2/4/8/16s), Ollama integration using core's parameter conventions, SQLite offline queue, circuit breaker (WP-03)
+- ADDED: Orchestrator task dispatch — submit/dispatch/lifecycle/retry/dead-letter, `SKIP LOCKED` queue, timeout watchdog (WP-04)
+- ADDED: Manager Console minimal scaffold — Tauri v2 + Svelte 5 + Tailwind; fleet view, task composer, result view (embeds Gruper core's conversation rendering), per-agent Chart.js analytics (WP-05)
+- ADDED: `.github/workflows/build-windows.yml` — Windows installer CI (NSIS + WiX), fixed the Tauri v2 `[lib]`-naming build break, now green and producing downloadable `.exe`/`.msi` artifacts on every `main` push
+- ADDED: End-to-end relay validation harness (`tests/e2e/wp06_relay_validation.py`) — drives the real relay against a mock Ollama; **17/17 green**; the first run surfaced and fixed 5 real message-contract bugs (task ID field mismatch, missing `task_ack`, wrong progress/result shapes, missing Ollama `messages` array, missing `fleet_event` broadcast) (WP-06)
+- OPEN: real two-machine public-internet/NAT field run (automated E2E proves the logic; the physical field run is still pending)
+
+**Phase 1.5 — Desktop-First Foundation (`gd-0.2.x`) — pivot from Docker+PostgreSQL-first to SQLite/no-Docker-first:**
+- CHANGED: Orchestrator now defaults to an embedded **SQLite** backend (`orchestrator.db`) with **PostgreSQL opt-in** via `DATABASE_URL` for the server tier; both dialects pass the same 35-test suite (5× repeated for determinism) with near-identical dispatch latency (~10ms) (WP-30)
+- ADDED: `.github/workflows/orchestrator-tests.yml` — first-ever orchestrator CI, as two separate jobs (SQLite with no services; PostgreSQL with a service container) so the SQLite job structurally cannot depend on a database server
+- FIXED: a genuine pre-existing concurrency bug in `ws/agent_ws.py` (agent ID could be lost on rapid disconnect, leaving a phantom idle agent) — found and fixed while pursuing SQLite/PostgreSQL test parity, confirmed to pre-date this work
+- ADDED: PyInstaller packaging for both the orchestrator and agent runtime — one-command build (`scripts/build-desktop.sh`/`.ps1`) producing self-contained executables; zero-config JWT secret auto-generation replacing a shared hardcoded default (a real security fix, not just UX) (WP-31)
+- ADDED: `scripts/validate-desktop-packaging.py` — proves the packaged orchestrator + agent relay a real task end to end with no Docker, no PostgreSQL, no manual Python setup
+- ADDED: Tauri Console now spawns, health-checks, and auto-connects to a local orchestrator sidecar with zero manual steps; `tauri-plugin-single-instance` prevents duplicate sidecars; graceful and forceful-kill (SIGKILL/orphan) shutdown handling verified against the real production `tauri build` binary via screenshot (WP-32)
+- ADDED: "+ Add Local Agent" onboarding flow — generates an agent identity, detects installed Ollama models, registers and spawns a second sidecar with no config files or manual JWT copy-paste (WP-32.1)
+- FIXED (3 rounds of real-Windows hardware bug reports, each found and closed): a placeholder-agent registration path that could never run a task; the detected Ollama model never reaching the spawned agent process; a Chromium/WebView2 Private Network Access policy silently blocking the webview's Ollama probe (moved to a Rust-side raw socket, `detect_ollama_models`); an indefinitely-hanging "waiting for agent to connect" state (rewritten as a bounded polling loop with 3 independent signals); a white-on-white Role Template dropdown; missing stale-task-clearing and per-agent stop controls
+- FIXED: a Windows-crashing bug in `agent-runtime/main.py` (`loop.add_signal_handler` unconditionally called — unsupported on Windows' `ProactorEventLoop`)
+- ADDED: unified cross-tier **debug logging system** — a Rust ring-buffer sink (5,000 entries) fed by structured JSON log lines from both Python sidecars and the Rust layer itself, plus the frontend; a Debug panel (category/level filters, live tail, search by `agent_id`/`task_id`, copy, `.jsonl`/`.txt` export, "Copy diagnostics"); two-stage secret redaction (Python emit-time + Rust sink-time) against JWTs, tokens, and key material (WP-32.2, `docs/Debug-Logging.md`)
+- ADDED: explicit `capabilities.default_model` selection end to end (schema → agent runtime → Console UI), replacing a silent hardcoded model fallback (WP-32.2)
+- ADDED: master/detail result view — Fleet | Tasks | wide Detail pane replacing the old cramped 28rem right-rail; real `marked` + DOMPurify markdown rendering, copy-result, distinct fetch-error state (WP-32.2)
+- **Open:** WP-31/WP-32/WP-32.1 are Linux-validated and Windows-CI-green (18 runs) but not yet re-verified by a human running the installers on physical Windows hardware — the single biggest remaining risk on the desktop-first push
+
+**Planning:**
+- ADDED: `docs/Phase2-gd-0.3-Plan.md` — a grounded, codebase-referenced plan for WP-07…WP-11 (cross-network sharing), including the recommendation (since acted on) to harden the desktop tier first
+
+**Documentation & congruence (this session, 2026-07-01):**
+- FIXED: `GruperDistributedSpec.md` §5.1 (recommended stack) and §9 (data models) updated from "PostgreSQL-first, SQLite-footnote" to "SQLite-default, PostgreSQL-opt-in," matching the desktop-first pivot already shipped in `ROADMAP.md` and `README.md` — closes the "companion spec not yet desktop-first" item that had been open in `ROADMAP.md`'s Known Technical Debt table since the WP-30 pass
+- ADDED: `ROADMAP.md` WP-32.2 section documenting the debug logging / model selection / result view work, which had shipped in code but was previously undocumented in the roadmap
+- UPDATED: `README.md` — Distributed badge (`gd-0.2 walking skeleton` → `gd-0.2.x desktop-first`), "what's shipped" table, positioning language clarifying Core is now the legacy/standalone fallback and Distributed the primary forward direction
+- UPDATED: `UserManual.md` — added a scope banner clarifying it documents Gruper Core specifically, with a pointer to the Distributed spec for multi-machine/cross-owner use
+- UPDATED: `WeeklyClaudeRoutineCheckup.md` — first entry to review the whole repository (previously scoped to `Gruper.html` only)
+
 ---
 
 ## Maintenance (2026-06-15 → 2026-06-27) — Infrastructure & Documentation
