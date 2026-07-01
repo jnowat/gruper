@@ -19,12 +19,13 @@
   import TaskComposer from '$lib/components/TaskComposer.svelte';
   import ResultView from '$lib/components/ResultView.svelte';
   import AgentAnalytics from '$lib/components/AgentAnalytics.svelte';
+  import RoundTable from '$lib/components/RoundTable.svelte';
   import DebugPanel from '$lib/components/DebugPanel.svelte';
 
   let ws: ConsoleWS | null = null;
   let activeAgentId = $state<string | null>(null);
   let activeTaskId = $state<string | null>(null);
-  let detailTab = $state<'result' | 'analytics'>('result');
+  let detailTab = $state<'result' | 'analytics' | 'roundtable'>('result');
   let loadingData = $state(false);
   let showAddAgent = $state(false);
   let showComposer = $state(false);
@@ -41,6 +42,14 @@
   const wsState = $derived($wsStatus);
 
   const onlineCount = $derived(agents.filter((a) => a.status !== 'offline').length);
+
+  // Name of the agent a task/row was sent to, for clearer Fleet↔Tasks linkage.
+  function agentNameFor(agentId: string | undefined): string | null {
+    if (!agentId) return null;
+    return agents.find((a) => a.id === agentId)?.name ?? null;
+  }
+  const activeTask = $derived(tasks.find((t) => t.id === activeTaskId) ?? null);
+  const activeTaskAgentName = $derived(agentNameFor(activeTask?.assigned_agent_id));
 
   // Connect WS and load initial data whenever token becomes available.
   $effect(() => {
@@ -99,7 +108,8 @@
   }
 
   function openComposer() {
-    if (!activeAgent) return;
+    if (agents.length === 0) return;
+    if (!activeAgentId) activeAgentId = agents[0].id;
     showComposer = true;
   }
 
@@ -247,8 +257,8 @@
           <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Tasks</span>
           <button
             onclick={openComposer}
-            disabled={!activeAgent}
-            title={activeAgent ? 'Compose a new task' : 'Select an agent first'}
+            disabled={agents.length === 0}
+            title={agents.length > 0 ? 'Compose a new task' : 'Add an agent first'}
             class="text-xs text-blue-400 hover:text-blue-300 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors"
           >
             + New task
@@ -291,12 +301,14 @@
                   'text-slate-500'
                 }">{task.status}</span>
               </div>
-              <p class="text-xs text-slate-600 mt-0.5 font-mono">{task.id.slice(0, 8)}…</p>
+              <p class="text-xs text-slate-600 mt-0.5 truncate">
+                {#if agentNameFor(task.assigned_agent_id)}→ {agentNameFor(task.assigned_agent_id)}{:else}<span class="font-mono">{task.id.slice(0, 8)}…</span>{/if}
+              </p>
             </button>
           {:else}
             <div class="text-center py-6 px-2 space-y-2">
               <p class="text-xs text-slate-600">No tasks yet.</p>
-              {#if activeAgent}
+              {#if agents.length > 0}
                 <button onclick={openComposer} class="text-xs text-blue-400 hover:text-blue-300">
                   + New task
                 </button>
@@ -311,6 +323,7 @@
         <div class="flex border-b border-white/5">
           {#each [
             { key: 'result' as const, label: 'Result' },
+            { key: 'roundtable' as const, label: 'Round Table' },
             { key: 'analytics' as const, label: 'Analytics' },
           ] as tab}
             <button
@@ -326,7 +339,9 @@
 
         <div class="flex-1 overflow-y-auto p-4">
           {#if detailTab === 'result'}
-            <ResultView taskId={activeTaskId} />
+            <ResultView taskId={activeTaskId} agentName={activeTaskAgentName} />
+          {:else if detailTab === 'roundtable'}
+            <RoundTable {agents} />
           {:else}
             <AgentAnalytics agent={activeAgent} />
           {/if}
@@ -340,7 +355,7 @@
     <AddAgentDialog onclose={() => { showAddAgent = false; }} />
   {/if}
 
-  {#if showComposer && activeAgent}
+  {#if showComposer && agents.length > 0}
     <!-- Composer modal — task creation is a transient action, not a permanent
          pane. Also the future home of the WP-10 sharing UI. -->
     <div
@@ -350,7 +365,7 @@
       role="presentation"
     >
       <div class="w-full max-w-lg max-h-[88vh] overflow-y-auto">
-        <TaskComposer agent={activeAgent} onTaskSubmitted={onComposerSubmitted} />
+        <TaskComposer {agents} bind:selectedAgentId={activeAgentId} onTaskSubmitted={onComposerSubmitted} />
         <button
           onclick={() => (showComposer = false)}
           class="mt-2 w-full text-xs text-slate-400 hover:text-slate-200 transition-colors"

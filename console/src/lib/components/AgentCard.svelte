@@ -28,6 +28,10 @@
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     return `${Math.floor(diff / 3600)}h ago`;
   });
+
+  const models = $derived(agent.capabilities?.models ?? []);
+  const defaultModel = $derived(agent.capabilities?.default_model ?? models[0] ?? null);
+  const role = $derived(agent.capabilities?.roles?.[0] ?? null);
 </script>
 
 <!--
@@ -51,18 +55,23 @@
           <span class="text-xs text-slate-400 status-{agent.status} flex-shrink-0">{agent.status}</span>
         </div>
 
-        {#if agent.capabilities?.models?.length}
-          {@const models = agent.capabilities.models}
-          {@const def = agent.capabilities.default_model ?? models[0]}
-          <p class="text-xs text-slate-500 truncate mt-0.5" title={`Default: ${def}\nAll: ${models.join(', ')}`}>
-            <span class="text-slate-300 font-mono">{def}</span>
-            {#if models.length > 1}
-              <span class="text-slate-600"> +{models.length - 1} more</span>
+        {#if defaultModel || role}
+          <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+            {#if defaultModel}
+              <span
+                class="text-xs font-mono text-slate-200 bg-white/5 border border-white/10 rounded px-1.5 py-0.5 truncate max-w-full"
+                title={`Default model: ${defaultModel}${models.length > 1 ? `\nAlso installed: ${models.join(', ')}` : ''}`}
+              >
+                {defaultModel}{#if models.length > 1}<span class="text-slate-500"> +{models.length - 1}</span>{/if}
+              </span>
             {/if}
-          </p>
+            {#if role}
+              <span class="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">{role}</span>
+            {/if}
+          </div>
         {/if}
 
-        <p class="text-xs text-slate-600 mt-0.5">seen {lastSeenLabel}</p>
+        <p class="text-xs text-slate-600 mt-1">seen {lastSeenLabel}</p>
       </div>
     </button>
 
