@@ -138,6 +138,8 @@ This is the primary way to run the full stack (Console + Orchestrator + Agent) l
 
 From the fleet dashboard, click **"+ Add"** to register and start your first agent — the Console generates its identity, probes `localhost:11434` for installed Ollama models, registers it with the local orchestrator, and launches it as a background process, all in one dialog. This closes what used to be the biggest gap in the desktop experience: previously there was no way to get from "Console installed" to "a task actually runs" without hand-editing `agent-runtime/.env` and copy-pasting a JWT from a `curl` command.
 
+Ollama detection runs automatically when the dialog opens and tells you exactly what's wrong if it can't find a usable model — "Ollama isn't running" vs. "Ollama is running but has no models" (with the exact `ollama pull` command to fix it) — with a Retry button once you've acted on it. **The "Add Agent" button stays disabled until at least one real model is confirmed**; it will not register a placeholder agent that can never run a task. If the local agent process fails to start (or crashes right after), the dialog reports the actual failure instead of a generic "should appear online soon."
+
 **Option B — build from source (any platform), one command:**
 
 ```bash
@@ -149,7 +151,9 @@ cd gruper
 
 This creates a build venv, installs both Python runtimes' dependencies, packages the orchestrator and agent as self-contained executables with PyInstaller (`dist/`), and stages the orchestrator as the Console's Tauri sidecar binary. Both executables are zero-config: SQLite database and JWT secret are created automatically on first run, bound to `127.0.0.1` only.
 
-Then launch the Console the same way as any Tauri app in this repo (`cd console && npm install && npm run dev`, then in another terminal `npx tauri dev` — see [Contributing](#contributing) for the full dev loop) — it will detect the staged sidecar, start it, and auto-connect. To run the packaged agent standalone instead of through the Console, run `dist/gruper-agent` (or `dist\gruper-agent.exe` on Windows) directly.
+Then launch the Console the same way as any Tauri app in this repo (`cd console && npm install && npm run dev`, then in another terminal `npx tauri dev` — see [Contributing](#contributing) for the full dev loop) — it will detect the staged sidecar, start it, and auto-connect.
+
+`dist/gruper-agent` (or `dist\gruper-agent.exe` on Windows) is meant to be started by the Console's "Add Local Agent" dialog, not run by hand — double-clicking it (or running it with no `AGENT_ID`/`JWT_TOKEN` set) now prints a plain-language explanation of that and points you at the Console instead of the old developer-facing `curl` instructions. If you deliberately want to run it standalone anyway (e.g. a headless machine dialing out to a remote orchestrator), copy `agent-runtime/.env.example` to `.env` next to the executable and fill in `ORCHESTRATOR_URL`/`AGENT_ID`/`JWT_TOKEN`.
 
 To validate the packaged executables end to end without any of the above (useful for CI or a quick sanity check), run `python scripts/validate-desktop-packaging.py` — it spins up a mock Ollama, the real packaged orchestrator and agent binaries, and confirms a task relays through successfully.
 

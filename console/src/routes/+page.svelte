@@ -111,7 +111,7 @@
             {/if}
             <button
               onclick={() => { showAddAgent = true; }}
-              class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              class="text-xs text-blue-400 hover:text-blue-300 transition-colors {agents.length === 0 && !loadingData ? 'animate-pulse font-semibold' : ''}"
               title="Add Local Agent"
             >
               + Add
@@ -128,9 +128,23 @@
             />
           {/each}
           {#if agents.length === 0 && !loadingData}
-            <p class="text-xs text-slate-600 text-center py-4">
-              No agents registered.<br />Click "+ Add" above to start one.
-            </p>
+            <div class="text-center py-6 px-2 space-y-2">
+              <p class="text-xs text-slate-400">
+                No agents registered yet.
+              </p>
+              <p class="text-xs text-slate-600">
+                Click <span class="text-blue-400 font-medium">"+ Add"</span> above to register and
+                start your first agent. You'll need
+                <a
+                  href="https://ollama.ai"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="text-blue-400 hover:text-blue-300 underline"
+                >Ollama</a>
+                installed and running locally with at least one model pulled
+                (e.g. <code class="text-slate-500">ollama pull llama3.1</code>).
+              </p>
+            </div>
           {/if}
         </div>
       </aside>

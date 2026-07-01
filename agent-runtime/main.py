@@ -84,20 +84,54 @@ def _exit_if_orphaned(poll_interval_s: float = 2.0) -> None:
             os._exit(0)
 
 
+def _print_standalone_help() -> None:
+    """Shown when this program is run without AGENT_ID/JWT_TOKEN configured.
+
+    That combination almost always means a user double-clicked
+    gruper-agent.exe (or ran it from a shell) directly, rather than through
+    the Console — the Console's "Add Local Agent" flow always sets both (see
+    spawn_local_agent in console/src-tauri/src/lib.rs). Previously this
+    printed a bare curl one-liner aimed at a developer manually driving the
+    REST API; a new desktop user has no way to act on that. This message
+    instead assumes the common case (wrong entry point) and gives the rare
+    case (deliberate headless/manual run) a concrete next step.
+    """
+    print(
+        "\n"
+        "Gruper Agent is a background helper process for the Gruper Console —\n"
+        "it isn't meant to be run directly like this.\n"
+        "\n"
+        "To add an agent:\n"
+        "  1. Open the Gruper Console\n"
+        "  2. Click \"+ Add\" in the Fleet sidebar\n"
+        "  3. Follow the \"Add Local Agent\" dialog — it starts this program for\n"
+        "     you automatically, with everything already filled in.\n"
+        "\n"
+        "Only if you deliberately want to run this agent by hand (e.g. a\n"
+        "headless machine dialing out to a remote orchestrator): copy\n"
+        ".env.example to .env next to this program and fill in\n"
+        "ORCHESTRATOR_URL, AGENT_ID (from POST /v1/agents), and JWT_TOKEN\n"
+        "(from POST /v1/auth/token).\n",
+        file=sys.stderr,
+    )
+
+
+def _pause_before_exit() -> None:
+    # A Windows double-click launch opens a fresh console window that closes
+    # the instant the process exits — without this, the message above is
+    # never actually seen. Only pause when stdin looks interactive; a
+    # non-interactive invocation (CI, a script piping input) should just exit.
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            input("Press Enter to exit...")
+    except (EOFError, OSError):
+        pass
+
+
 async def _run() -> None:
-    if not settings.agent_id:
-        logger.error(
-            "AGENT_ID is not set. Register this agent first:\n"
-            "  curl -X POST <orchestrator>/v1/agents -H 'Authorization: Bearer <jwt>' ...\n"
-            "Then set AGENT_ID in .env to the returned id."
-        )
-        sys.exit(1)
-    if not settings.jwt_token:
-        logger.error(
-            "JWT_TOKEN is not set. Obtain one first:\n"
-            "  curl -X POST <orchestrator>/v1/auth/token ...\n"
-            "Then set JWT_TOKEN in .env."
-        )
+    if not settings.agent_id or not settings.jwt_token:
+        _print_standalone_help()
+        _pause_before_exit()
         sys.exit(1)
 
     client = AgentWSClient()

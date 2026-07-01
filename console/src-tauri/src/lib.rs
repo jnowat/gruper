@@ -298,6 +298,13 @@ async fn manage_orchestrator(app: AppHandle) {
 /// per-owner, not per-agent (see orchestrator/ws/agent_ws.py), and the
 /// spawned agent is owned by the same user as the Console that spawned it,
 /// which matches this feature's explicit single-machine/single-owner scope.
+/// How long to watch a freshly-spawned agent sidecar for an immediate crash
+/// (missing DLL, antivirus quarantine of the freshly-extracted onefile
+/// payload, bad working directory) before declaring the spawn successful.
+/// Long enough to catch a near-instant process exit; short enough not to
+/// make every "Add Local Agent" click feel like it hung.
+const AGENT_SPAWN_GRACE_MS: u64 = 800;
+
 #[tauri::command]
 async fn spawn_local_agent(
     app: AppHandle,
@@ -305,6 +312,7 @@ async fn spawn_local_agent(
     jwt_token: String,
     orchestrator_url: String,
     ollama_url: Option<String>,
+    capabilities_json: Option<String>,
 ) -> Result<(), String> {
     let data_dir = resolve_sidecar_data_dir(&app)?;
     // Each local agent gets its own working directory so their SQLite offline
@@ -335,10 +343,66 @@ async fn spawn_local_agent(
     } else {
         sidecar
     };
+    // Without this, the agent process falls back to its own hardcoded
+    // default model (see agent-runtime/ws_client.py::_model_and_options)
+    // instead of whatever model the "Add Local Agent" dialog actually
+    // detected — a real model was chosen in the UI but never made it to the
+    // process that runs tasks.
+    let sidecar = if let Some(caps) = capabilities_json {
+        sidecar.env("CAPABILITIES", caps)
+    } else {
+        sidecar
+    };
 
     let (mut rx, child) = sidecar
         .spawn()
         .map_err(|e| format!("failed to start local agent {agent_id}: {e}"))?;
+
+    // Grace period: give the process a moment to crash immediately so a
+    // failure is reported synchronously to the caller (and shown in the
+    // dialog) instead of leaving the frontend to time out waiting for an
+    // agent that will never come online.
+    let mut last_output: Option<String> = None;
+    let mut crashed: Option<String> = None;
+    let grace = tokio::time::sleep(Duration::from_millis(AGENT_SPAWN_GRACE_MS));
+    tokio::pin!(grace);
+    loop {
+        tokio::select! {
+            _ = &mut grace => break,
+            event = rx.recv() => {
+                match event {
+                    Some(CommandEvent::Stdout(line)) | Some(CommandEvent::Stderr(line)) => {
+                        let text = String::from_utf8_lossy(&line).trim().to_string();
+                        if !text.is_empty() {
+                            eprintln!("[agent:{agent_id}] {text}");
+                            last_output = Some(text);
+                        }
+                    }
+                    Some(CommandEvent::Error(err)) => {
+                        crashed = Some(err);
+                        break;
+                    }
+                    Some(CommandEvent::Terminated(payload)) => {
+                        crashed = Some(format!(
+                            "process exited immediately (code {:?}){}",
+                            payload.code,
+                            last_output
+                                .as_ref()
+                                .map(|l| format!(" — last output: {l}"))
+                                .unwrap_or_default()
+                        ));
+                        break;
+                    }
+                    None => break,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if let Some(reason) = crashed {
+        return Err(format!("agent sidecar failed to start: {reason}"));
+    }
 
     if let Some(state) = app.try_state::<SidecarState>() {
         state
@@ -348,9 +412,13 @@ async fn spawn_local_agent(
             .insert(agent_id.clone(), child);
     }
 
-    // Drain stdout/stderr into the Console's own log, same as the
-    // orchestrator sidecar — invaluable for diagnosing why a freshly-added
-    // agent never shows up as online.
+    // Drain stdout/stderr into the Console's own log for the rest of the
+    // process's life, same as the orchestrator sidecar — invaluable for
+    // diagnosing why a freshly-added agent never shows up as online. Also
+    // emit a Tauri event on a later crash/exit so the frontend (still
+    // waiting for the agent to appear in the fleet) can report a real
+    // failure instead of just quietly timing out.
+    let app_for_task = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
@@ -359,9 +427,20 @@ async fn spawn_local_agent(
                 }
                 CommandEvent::Error(err) => {
                     eprintln!("[agent:{agent_id}] error: {err}");
+                    let _ = app_for_task.emit(
+                        "agent-sidecar-exited",
+                        serde_json::json!({ "agent_id": agent_id, "error": err }),
+                    );
                 }
                 CommandEvent::Terminated(payload) => {
                     eprintln!("[agent:{agent_id}] exited: {:?}", payload);
+                    if let Some(state) = app_for_task.try_state::<SidecarState>() {
+                        state.agents.lock().unwrap().remove(&agent_id);
+                    }
+                    let _ = app_for_task.emit(
+                        "agent-sidecar-exited",
+                        serde_json::json!({ "agent_id": agent_id, "code": payload.code }),
+                    );
                     break;
                 }
                 _ => {}
