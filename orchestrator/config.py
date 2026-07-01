@@ -7,8 +7,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Database
-    database_url: str = "postgresql://gruper:gruper@localhost:5432/gruper"
+    # Database — desktop-first default: an embedded SQLite file, no server
+    # to install or run. Set DATABASE_URL to a postgresql:// DSN to opt
+    # into the PostgreSQL/server tier (multi-user, production deployments).
+    database_url: str = "sqlite:///orchestrator.db"
 
     # JWT — HS256 for gd-0.1; ed25519 signing added at WP-07
     jwt_secret: str = "change-me-in-production"

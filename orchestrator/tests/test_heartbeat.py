@@ -4,6 +4,7 @@ Smoke tests: WebSocket agent registration, heartbeat, status update, disconnect 
 
 import base64
 import secrets
+import time
 
 import pytest
 from starlette.testclient import TestClient
@@ -11,6 +12,11 @@ from starlette.testclient import TestClient
 
 def _rand_pubkey() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+
+
+def _wait_for_server_processing() -> None:
+    """See test_tasks.py::_wait_for_server_processing for why this is needed."""
+    time.sleep(0.05)
 
 
 def _capabilities() -> dict:
@@ -75,7 +81,9 @@ class TestAgentWebSocket:
         with client.websocket_connect(f"/v1/agents/ws?token={token}") as ws:
             ws.send_json({"type": "register", "agent_id": agent_id})
             ws.receive_json()  # "registered"
-        # WebSocket closed — agent should be offline
+        # WebSocket closed — agent should be offline once the server's
+        # disconnect handler finishes (see _wait_for_server_processing).
+        _wait_for_server_processing()
         agent = _get_agent(client, token, agent_id)
         assert agent is not None
         assert agent["status"] == "offline"

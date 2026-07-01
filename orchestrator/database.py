@@ -1,77 +1,40 @@
-import json
-import logging
-from pathlib import Path
+"""Thin façade over `orchestrator/db/` preserving the pre-WP-30 public API.
 
-import asyncpg
+`main.py`, `dispatcher.py`, the routers, and the WS handlers all import
+`init_db` / `close_db` / `get_pool` / `run_migrations` / `append_event`
+from this module. Keeping those names and signatures stable here means
+none of those call sites needed to change import paths when the SQLite
+backend was introduced — only the SQL text and a handful of call sites
+that relied on PostgreSQL-only behavior (DB-generated UUIDs/timestamps,
+`InvalidTextRepresentationError`) needed updates.
+"""
 
-logger = logging.getLogger(__name__)
+from __future__ import annotations
 
-_pool: asyncpg.Pool | None = None
+from .db import Database, connect_db, get_db, close_db as _close_db
+from .db.migrate import run_migrations
+from .db.util import new_id, now_iso
 
-MIGRATIONS_DIR = Path(__file__).parent / "migrations"
-
-
-async def _init_connection(conn: asyncpg.Connection) -> None:
-    """Register JSON/JSONB codecs so asyncpg can accept Python dicts as JSONB parameters."""
-    await conn.set_type_codec("json",  encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
-    await conn.set_type_codec("jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog")
+__all__ = ["init_db", "close_db", "get_pool", "run_migrations", "append_event"]
 
 
-async def init_db(url: str) -> asyncpg.Pool:
-    global _pool
-    _pool = await asyncpg.create_pool(url, min_size=2, max_size=10, init=_init_connection)
-    logger.info("Database pool established")
-    return _pool
+async def init_db(url: str) -> Database:
+    return await connect_db(url)
 
 
 async def close_db() -> None:
-    global _pool
-    if _pool:
-        await _pool.close()
-        _pool = None
+    await _close_db()
 
 
-def get_pool() -> asyncpg.Pool:
-    if _pool is None:
-        raise RuntimeError("Database pool not initialised — call init_db() first")
-    return _pool
-
-
-async def run_migrations(pool: asyncpg.Pool) -> None:
-    """Apply any unapplied SQL migration files in order, idempotently.
-
-    Each migration runs inside its own transaction. If the SQL fails, the
-    transaction rolls back and the filename is NOT recorded, so the migration
-    will be retried on the next startup rather than silently skipped.
-    """
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                filename   TEXT        PRIMARY KEY,
-                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """)
-
-        for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-            filename = path.name
-            already_applied = await conn.fetchval(
-                "SELECT 1 FROM schema_migrations WHERE filename = $1", filename
-            )
-            if already_applied:
-                logger.debug("Migration %s already applied — skipping", filename)
-                continue
-
-            sql = path.read_text()
-            async with conn.transaction():
-                await conn.execute(sql)
-                await conn.execute(
-                    "INSERT INTO schema_migrations (filename) VALUES ($1)", filename
-                )
-            logger.info("Applied migration: %s", filename)
+def get_pool() -> Database:
+    """Named get_pool() for historical/API-stability reasons — returns the
+    active Database handle (PostgreSQL pool or SQLite connection wrapper),
+    not literally a connection pool on the SQLite path."""
+    return get_db()
 
 
 async def append_event(
-    pool: asyncpg.Pool,
+    db: Database,
     *,
     actor_id: str,
     action: str,
@@ -80,16 +43,18 @@ async def append_event(
     metadata: dict | None = None,
 ) -> str:
     """Append an audit event and return its UUID string."""
-    row = await pool.fetchrow(
+    event_id = new_id()
+    await db.execute(
         """
-        INSERT INTO events (actor_id, action, subject_id, secondary_subject_id, metadata)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id::text
+        INSERT INTO events (id, ts, actor_id, action, subject_id, secondary_subject_id, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         """,
+        event_id,
+        now_iso(),
         actor_id,
         action,
         subject_id,
         secondary_subject_id,
         metadata,
     )
-    return row["id"]
+    return event_id

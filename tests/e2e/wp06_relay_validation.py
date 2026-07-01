@@ -10,7 +10,9 @@ processes and real WebSockets:
         │  WS:   GET /v1/console/ws   (receives fleet_snapshot/fleet_event/
         │                              task_progress/task_complete)
         ▼
-    orchestrator   (real FastAPI app under uvicorn, real PostgreSQL)
+    orchestrator   (real FastAPI app under uvicorn — SQLite by default, the
+                    desktop tier; PostgreSQL via --backend postgres, the
+                    server tier)
         ▲
         │  outbound WS from the agent — GET /v1/agents/ws
         │  (this is the whole point of the relay model: the agent dials OUT,
@@ -36,6 +38,8 @@ the real two-machine run.
 
 Usage:
     python tests/e2e/wp06_relay_validation.py [--json OUT.json]
+    python tests/e2e/wp06_relay_validation.py --backend sqlite    # default — desktop tier, no services
+    python tests/e2e/wp06_relay_validation.py --backend postgres  # server tier — needs a running PostgreSQL
 
 Exit code 0 if every check passes, 1 otherwise.
 """
@@ -52,7 +56,6 @@ import time
 import uuid
 from pathlib import Path
 
-import asyncpg
 import httpx
 import websockets
 
@@ -67,11 +70,46 @@ ORCH_HTTP = f"http://{ORCH_HOST}:{ORCH_PORT}"
 ORCH_WS = f"ws://{ORCH_HOST}:{ORCH_PORT}"
 OLLAMA_URL = f"http://127.0.0.1:{OLLAMA_PORT}"
 
-DB_URL = "postgresql://gruper:gruper@localhost:5432/gruper_e2e"
 JWT_SECRET = "wp06-e2e-secret"
 
 SCRATCH = Path(os.environ.get("WP06_SCRATCH", "/tmp/wp06"))
 SCRATCH.mkdir(parents=True, exist_ok=True)
+
+# Backend selection mirrors the orchestrator's own DATABASE_URL convention
+# (see orchestrator/db/connect.py). SQLite is the default — the desktop
+# tier, no external service required, same as `pytest` with no setup.
+# PostgreSQL is opt-in via --backend postgres — the server tier, exercising
+# the real SKIP LOCKED / CTE dispatch SQL against a live Postgres instance.
+SQLITE_DB_PATH = SCRATCH / "gruper_e2e.db"
+POSTGRES_DB_URL = "postgresql://gruper:gruper@localhost:5432/gruper_e2e"
+
+
+def _db_url(backend: str) -> str:
+    return f"sqlite:///{SQLITE_DB_PATH}" if backend == "sqlite" else POSTGRES_DB_URL
+
+
+async def _reset_db(backend: str) -> None:
+    if backend == "sqlite":
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(SQLITE_DB_PATH) + suffix).unlink(missing_ok=True)
+        return
+
+    import asyncpg  # server-tier only — not a desktop dependency
+
+    sys_conn = await asyncpg.connect("postgresql://gruper:gruper@localhost:5432/postgres")
+    try:
+        exists = await sys_conn.fetchval("SELECT 1 FROM pg_database WHERE datname='gruper_e2e'")
+        if not exists:
+            await sys_conn.execute("CREATE DATABASE gruper_e2e OWNER gruper")
+    finally:
+        await sys_conn.close()
+    conn = await asyncpg.connect(POSTGRES_DB_URL)
+    try:
+        await conn.execute(
+            "DROP TABLE IF EXISTS events, tasks, agents, users, schema_migrations CASCADE"
+        )
+    finally:
+        await conn.close()
 
 
 # ── result tracking ───────────────────────────────────────────────────────────
@@ -102,23 +140,6 @@ def _rand_pubkey() -> str:
     return base64.urlsafe_b64encode(uuid.uuid4().bytes + uuid.uuid4().bytes).rstrip(b"=").decode()
 
 
-async def _reset_db() -> None:
-    sys_conn = await asyncpg.connect("postgresql://gruper:gruper@localhost:5432/postgres")
-    try:
-        exists = await sys_conn.fetchval("SELECT 1 FROM pg_database WHERE datname='gruper_e2e'")
-        if not exists:
-            await sys_conn.execute("CREATE DATABASE gruper_e2e OWNER gruper")
-    finally:
-        await sys_conn.close()
-    conn = await asyncpg.connect(DB_URL)
-    try:
-        await conn.execute(
-            "DROP TABLE IF EXISTS events, tasks, agents, users, schema_migrations CASCADE"
-        )
-    finally:
-        await conn.close()
-
-
 async def _wait_http(url: str, timeout: float = 30.0) -> bool:
     deadline = time.monotonic() + timeout
     async with httpx.AsyncClient() as c:
@@ -133,10 +154,10 @@ async def _wait_http(url: str, timeout: float = 30.0) -> bool:
     return False
 
 
-def _spawn_orchestrator() -> subprocess.Popen:
+def _spawn_orchestrator(db_url: str) -> subprocess.Popen:
     env = {
         **os.environ,
-        "DATABASE_URL": DB_URL,
+        "DATABASE_URL": db_url,
         "JWT_SECRET": JWT_SECRET,
         "LOG_LEVEL": "INFO",
         "HEARTBEAT_CHECK_INTERVAL_S": "5",
@@ -297,14 +318,14 @@ async def _poll_agent_status(client, token, agent_id, want, timeout) -> bool:
 
 # ── main scenario ─────────────────────────────────────────────────────────────
 
-async def run() -> None:
+async def run(backend: str) -> None:
     procs: dict[str, subprocess.Popen] = {}
     console: ConsoleClient | None = None
     try:
-        print("== Setup ==", flush=True)
-        await _reset_db()
+        print(f"== Setup (backend={backend}) ==", flush=True)
+        await _reset_db(backend)
         procs["ollama"] = _spawn_ollama()
-        procs["orch"] = _spawn_orchestrator()
+        procs["orch"] = _spawn_orchestrator(_db_url(backend))
         ok_orch = await _wait_http(f"{ORCH_HTTP}/openapi.json", 40)
         ok_oll = await _wait_http(f"{OLLAMA_URL}/api/tags", 20)
         R.check("orchestrator process is up", ok_orch)
@@ -452,10 +473,16 @@ async def run() -> None:
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", default=str(SCRATCH / "wp06_results.json"))
+    ap.add_argument(
+        "--backend", choices=["sqlite", "postgres"], default="sqlite",
+        help="Orchestrator DB backend to validate against. sqlite (default) is the "
+             "desktop tier — no external service required. postgres is the server "
+             "tier — needs a reachable PostgreSQL (gruper/gruper, CREATEDB).",
+    )
     args = ap.parse_args()
 
-    print("WP-06 End-to-End Relay Validation\n" + "=" * 50, flush=True)
-    await run()
+    print(f"WP-06 End-to-End Relay Validation (backend={args.backend})\n" + "=" * 50, flush=True)
+    await run(args.backend)
 
     summary = {
         "passed": R.passed,

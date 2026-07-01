@@ -17,10 +17,15 @@ env/
 .env.*
 !.env.example
 
-# Agent runtime offline-queue SQLite DB (created at runtime)
+# SQLite DBs created at runtime (agent offline queue; orchestrator desktop-default store)
 agent.db
+orchestrator.db
 *.sqlite
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+orchestrator.db-wal
+orchestrator.db-shm
 
 # WP-06 end-to-end harness scratch (logs, results, per-run DBs)
 /tmp/wp06/

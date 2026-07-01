@@ -17,7 +17,7 @@ Gruper is a local-first multi-agent AI system built on [Ollama](https://ollama.a
 | Status | Stable — `v0.4.5` | Pre-v1 — walking skeleton (`gd-0.2`) |
 | Agents | Up to 6, on one machine | Unlimited, across machines and owners |
 | Sharing | None | Scoped cross-user tokens with instant revocation |
-| Infrastructure | None — open the file | Docker Compose orchestrator + agent runtime |
+| Infrastructure | None — open the file | Orchestrator (SQLite by default, no Docker) + agent runtime |
 | Best for | Quick single-machine sessions | Distributed work, collaboration, cloud burst |
 
 Both tiers share the same Ollama API shape, 12 agent role templates, circuit-breaker discipline, and Chart.js visual language. Core is the proven baseline; Distributed extends it without replacing it.
@@ -123,7 +123,7 @@ A companion system that extends Gruper Core across multiple machines and multipl
 | Component | Status | Notes |
 |-----------|--------|-------|
 | `spec/contracts/` | ✅ Frozen | OpenAPI 3.1, WSS schema, 5 JSON Schema models, core mapping |
-| `orchestrator/` | ✅ Running | FastAPI + PostgreSQL, JWT auth, task dispatch + result relay, console WS (WP-04/05) |
+| `orchestrator/` | ✅ Running | FastAPI, JWT auth, task dispatch + result relay, console WS (WP-04/05); **SQLite by default, PostgreSQL opt-in for the server tier (WP-30)** |
 | `agent-runtime/` | ✅ Code complete | Outbound WSS client, Ollama, offline queue, circuit breaker; dispatch contract aligned + validated in WP-06 |
 | `console/` | ✅ Scaffold complete | Tauri v2 + Svelte 5; fleet view, task composer, result view, analytics; frontend build verified |
 | end-to-end relay | ✅ Automated E2E green | `tests/e2e/` drives the real relay 17/17; real-NAT field run pending ([WP-06 report](docs/WP-06-Validation.md)) |
@@ -139,7 +139,7 @@ cd src-tauri && cargo build   # verify the Tauri Rust shell compiles
 npx tauri dev        # launches the desktop app against the running dev server
 ```
 
-To connect the console, start the orchestrator first (`docker compose up` in `orchestrator/`), then enter the orchestrator URL and your public key in the Connect dialog.
+To connect the console, start the orchestrator first — `cd orchestrator && pip install -r requirements.txt && uvicorn main:app --port 8080` uses a local SQLite file with no Docker or PostgreSQL (see [`orchestrator/README.md`](orchestrator/README.md); `docker compose up` remains available for the PostgreSQL/server tier) — then enter the orchestrator URL and your public key in the Connect dialog.
 
 **Next:** the real two-machine public-internet/NAT field run — the last `gd-0.2` exit-gate step. The relay logic, dispatch, requeue-on-disconnect, and live console event stream are already validated by the committed [`tests/e2e`](tests/e2e) harness ([report](docs/WP-06-Validation.md)); the field run confirms it on real hardware over `wss://`.
 
@@ -149,7 +149,7 @@ To connect the console, start the orchestrator first (`docker compose up` in `or
 Manager Console (Tauri + Svelte)
         │  REST / WSS (/console/ws)
         ▼
-   Orchestrator (FastAPI + PostgreSQL)
+   Orchestrator (FastAPI; SQLite default / PostgreSQL opt-in)
       ▲         ▲         ▲
       │ WSS     │ WSS     │ WSS
   Agent A    Agent B    Agent C
@@ -199,7 +199,7 @@ Full detail in [ROADMAP.md](ROADMAP.md).
 **Gruper Distributed** *(in progress — `gd-0.2`)*
 - Agent runtime: Python + FastAPI; Rust for security-critical paths
 - Manager Console: Tauri v2 + Svelte 5 + Tailwind
-- Orchestrator: FastAPI + PostgreSQL (Docker Compose)
+- Orchestrator: FastAPI; SQLite by default (desktop), PostgreSQL opt-in via Docker Compose (server tier)
 - Transport: WSS over TLS
 - Encryption: X25519 ECDH + ChaCha20-Poly1305 (payload), ed25519 (identity)
 - Schemas: JSON Schema 2020-12, generates Pydantic (FastAPI) and TypeScript (console)

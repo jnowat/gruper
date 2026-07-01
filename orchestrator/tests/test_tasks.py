@@ -4,6 +4,7 @@ Smoke tests: task submission, dispatch, lifecycle, retry, and idempotency.
 
 import base64
 import secrets
+import time
 import uuid
 
 import pytest
@@ -12,6 +13,27 @@ from starlette.testclient import TestClient
 
 def _rand_pubkey() -> str:
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+
+
+def _wait_for_server_processing() -> None:
+    """Give the ASGI app's background-thread event loop a moment to process
+    a just-sent WebSocket frame before asserting on its side effect.
+
+    Starlette's TestClient runs the app in a separate thread via a blocking
+    portal. `ws.send_json()` only guarantees the frame was handed to that
+    thread's receive queue — not that the server's `while True:
+    receive_json()` loop has resumed and finished handling it. Messages
+    with no response frame (task_ack, result) have no built-in
+    synchronization point, unlike `register` (which the tests already wait
+    on via `ws.receive_json()`). This is a pre-existing gap in the test
+    harness's synchronization (confirmed by reproducing the same failures
+    against unmodified pre-WP-30 code and a live PostgreSQL backend — it is
+    not specific to SQLite or to this work packet), made newly visible by
+    the currently-installed anyio/starlette versions' scheduling behavior.
+    A short real-time sleep is safe here because the portal runs on its own
+    thread and keeps making progress while this thread sleeps.
+    """
+    time.sleep(0.05)
 
 
 def _capabilities() -> dict:
@@ -330,7 +352,8 @@ class TestTaskDispatch:
             ws.receive_json()  # consume task_push
 
             ws.send_json({"type": "task_ack", "task_id": task_id})
-            # No response frame for ack; verify via REST
+            # No response frame for ack; give the server a moment then verify via REST
+            _wait_for_server_processing()
             data = _get_task(client, token, task_id)
         assert data["status"] == "running"
 
@@ -356,6 +379,7 @@ class TestTaskDispatch:
                 "result":  {"answer": "42"},
                 "error":   None,
             })
+            _wait_for_server_processing()
             data = _get_task(client, token, task_id)
         assert data["status"] == "complete"
         assert data["result"] == {"answer": "42"}
@@ -383,6 +407,7 @@ class TestTaskDispatch:
                 "result":  None,
                 "error":   {"message": "Ollama unavailable"},
             })
+            _wait_for_server_processing()
             data = _get_task(client, token, task_id)
         assert data["status"] == "failed"
         assert data["error"] == {"message": "Ollama unavailable"}
@@ -401,7 +426,9 @@ class TestTaskDispatch:
             resp = _submit_task(client, token, agent_id)
             task_id = resp.json()["id"]
             ws.receive_json()  # consume task_push — task is now 'dispatched', not acked
-        # WS disconnected — requeue_or_deadletter should run
+        # WS disconnected — requeue_or_deadletter should run in the server's
+        # disconnect handler; give it a moment (see _wait_for_server_processing).
+        _wait_for_server_processing()
 
         data = _get_task(client, token, task_id)
         assert data["status"] == "pending"
