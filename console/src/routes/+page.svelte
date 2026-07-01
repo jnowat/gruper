@@ -382,7 +382,7 @@
                 </button>
               </div>
             {:else}
-              <ResultView taskId={activeTaskId} agentName={activeTaskAgentName} />
+              <ResultView taskId={activeTaskId} agentId={activeTask?.assigned_agent_id ?? null} agentName={activeTaskAgentName} />
             {/if}
           {:else if detailTab === 'roundtable'}
             <RoundTable {agents} />

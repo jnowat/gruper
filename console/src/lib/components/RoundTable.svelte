@@ -232,11 +232,14 @@
             <span class="flex-1 border-t border-white/5"></span>
           </div>
         {/if}
-        <div class="glass-card p-3">
+        <div class="glass-card p-3 transition-colors {turn.status === 'thinking' || turn.status === 'streaming' ? 'border-blue-500/40 bg-blue-500/5' : ''}">
           <div class="flex items-center gap-2 mb-1.5">
             <AgentAvatar id={turn.agentId} name={turn.agentName} size={22} />
             <span class="text-xs font-medium text-white">{turn.agentName}</span>
             <span class="text-xs text-blue-300">{turn.role}</span>
+            {#if turn.status === 'thinking' || turn.status === 'streaming'}
+              <span class="text-xs text-amber-400 progress-pulse">responding…</span>
+            {/if}
             <span class="flex-1"></span>
             <span class="text-xs text-slate-600 font-mono">{turn.model}</span>
           </div>

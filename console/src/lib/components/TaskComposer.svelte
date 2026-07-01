@@ -1,15 +1,15 @@
 <!--
-  Task composer. The one primary choice is WHICH AGENT runs the task; each agent
-  already has a default model, so the model is not shown at all unless you ask to
-  change it ("using <default> · change"). This removes the "choosing a model
-  twice" confusion — the common path is: pick agent → type prompt → submit.
+  Task composer. The one visible choice is WHICH AGENT should handle the task —
+  agents are named helpers, each with its own model. The model is NOT shown in
+  the normal flow at all; it only appears as an override inside "Advanced". So
+  the common path is simply: pick agent → type prompt → ask.
 -->
 <script lang="ts">
   import { authStore } from '$lib/stores/auth.js';
   import { tasksStore } from '$lib/stores/tasks.js';
   import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
-  import { agentModel, agentRole, agentLabel } from '$lib/agentDisplay.js';
+  import { agentModel, agentRole } from '$lib/agentDisplay.js';
   import AgentAvatar from '$lib/components/AgentAvatar.svelte';
   import type { Agent, DataClass, TaskSubmitRequest } from '$lib/types.js';
 
@@ -32,8 +32,7 @@
   const defaultModel = $derived(agent ? agentModel(agent) : '');
 
   let prompt = $state('');
-  let overrideModel = $state(false);
-  let modelName = $state(''); // '' = use the agent's default
+  let modelName = $state(''); // '' = use the agent's default (Advanced only)
   let temperature = $state(0.7);
   let topP = $state(0.9);
   let topK = $state(40);
@@ -59,7 +58,6 @@
   let roleEdited = $state(false);
   $effect(() => {
     void selectedAgentId;
-    overrideModel = false;
     modelName = '';
     const r = agent ? agentRole(agent) : null;
     if (!roleEdited && r && ROLE_TEMPLATES.includes(r)) roleTemplate = r;
@@ -73,7 +71,7 @@
     loading = true;
     try {
       const client = new OrchestratorClient(auth.orchestratorUrl, auth.token);
-      const effectiveModel = overrideModel ? modelName : '';
+      const effectiveModel = modelName; // '' → the agent's default
       const body: TaskSubmitRequest = {
         assigned_agent_id: agent.id,
         data_class: dataClass,
@@ -119,7 +117,7 @@
           class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
         >
           {#each agents as a (a.id)}
-            <option value={a.id} class="bg-slate-800 text-white">{agentLabel(a)}{a.status === 'offline' ? ' · offline' : ''}</option>
+            <option value={a.id} class="bg-slate-800 text-white">{a.name}{agentRole(a) ? ` · ${agentRole(a)}` : ''}{a.status === 'offline' ? ' · offline' : ''}</option>
           {/each}
         </select>
         {#if agent}
@@ -128,8 +126,7 @@
             <div class="min-w-0">
               <p class="text-sm text-white truncate">{agent.name}</p>
               <p class="text-xs text-slate-500 truncate">
-                {#if defaultModel}<span class="font-mono text-slate-400">{defaultModel}</span>{/if}
-                {#if agentRole(agent)}<span class="text-blue-300"> · {agentRole(agent)}</span>{/if}
+                {#if agentRole(agent)}<span class="text-blue-300">{agentRole(agent)}</span>{/if}
                 {#if agent.status === 'offline'}<span class="text-amber-400"> · offline (task will queue)</span>{/if}
               </p>
             </div>
@@ -181,41 +178,32 @@
       </div>
     </div>
 
-    <!-- Model: hidden by default; the agent's default is used unless you change it. -->
-    {#if agent}
-      <div class="text-xs text-slate-500">
-        {#if !overrideModel}
-          Model: <span class="font-mono text-slate-400">{defaultModel || 'agent default'}</span>
-          {#if agent.capabilities?.models?.length}
-            · <button type="button" class="text-blue-400 hover:text-blue-300" onclick={() => (overrideModel = true)}>change for this task</button>
-          {/if}
-        {:else}
-          <div class="flex items-center gap-2">
-            <select
-              bind:value={modelName}
-              class="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
-            >
-              <option value="" class="bg-slate-800 text-white">Agent default ({defaultModel})</option>
-              {#each agent.capabilities?.models ?? [] as m}
-                <option value={m} class="bg-slate-800 text-white">{m}</option>
-              {/each}
-            </select>
-            <button type="button" class="text-slate-400 hover:text-slate-200" onclick={() => { overrideModel = false; modelName = ''; }}>use default</button>
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    <!-- Advanced: inference parameters -->
+    <!-- Advanced: model override (defaults to the agent's model) + inference params -->
     <button
       type="button"
       class="text-xs text-slate-400 hover:text-slate-200 transition-colors"
       onclick={() => (showAdvanced = !showAdvanced)}
     >
-      {showAdvanced ? '▲ Hide' : '▼ Show'} inference parameters
+      {showAdvanced ? '▲ Hide' : '▼ Show'} advanced options
     </button>
 
     {#if showAdvanced}
+      {#if agent?.capabilities?.models?.length}
+        <div class="bg-white/5 rounded-lg p-3">
+          <label class="block text-xs text-slate-400 mb-1" for="model-override">Model</label>
+          <select
+            id="model-override"
+            bind:value={modelName}
+            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+          >
+            <option value="" class="bg-slate-800 text-white">Use {agent.name}'s model ({defaultModel})</option>
+            {#each agent.capabilities.models as m}
+              <option value={m} class="bg-slate-800 text-white">{m}</option>
+            {/each}
+          </select>
+          <p class="text-xs mt-1 text-slate-500">Only change this to run this one task on a different installed model.</p>
+        </div>
+      {/if}
       <div class="grid grid-cols-2 gap-3 bg-white/5 rounded-lg p-3">
         {#each [
           { label: 'Temperature', id: 'temp', bind: temperature, min: 0, max: 1, step: 0.05 },
@@ -259,7 +247,7 @@
       disabled={loading || !agent || !prompt.trim()}
       class="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
     >
-      {loading ? 'Submitting…' : agent ? `Submit to ${agent.name}` : 'Submit Task'}
+      {loading ? 'Sending…' : agent ? `Ask ${agent.name}` : 'Submit'}
     </button>
   </form>
 </div>

@@ -19,6 +19,22 @@ export function agentColor(id: string): string {
   return PALETTE[hash(id) % PALETTE.length];
 }
 
+// Short, memorable, neutral names so a fleet reads like named helpers ("ask
+// Sage") instead of a wall of "Local Agent" / "gemma3 · analyst". Used only to
+// suggest a name at creation time; the user can always edit it.
+const FRIENDLY_NAMES = [
+  'Aria', 'Atlas', 'Beacon', 'Cedar', 'Cirrus', 'Comet', 'Delta', 'Echo', 'Ember', 'Fable',
+  'Flint', 'Gale', 'Halo', 'Harbor', 'Iris', 'Juno', 'Kepler', 'Koda', 'Lyra', 'Marlow',
+  'Meridian', 'Milo', 'Nova', 'Nyx', 'Onyx', 'Orion', 'Otis', 'Pascal', 'Pixel', 'Quill',
+  'Quartz', 'Rune', 'Sage', 'Sable', 'Sol', 'Tao', 'Terra', 'Vega', 'Vela', 'Wren',
+  'Yuki', 'Zenith', 'Zephyr',
+];
+
+/** A memorable suggested name derived from a seed (e.g. the agent's pubkey). */
+export function friendlyName(seed: string): string {
+  return FRIENDLY_NAMES[hash(seed) % FRIENDLY_NAMES.length];
+}
+
 export function agentInitials(name: string): string {
   const words = name.trim().split(/[\s·_/-]+/).filter(Boolean);
   if (words.length === 0) return '?';
