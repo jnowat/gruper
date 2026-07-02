@@ -41,7 +41,7 @@ async def handle_console_ws(websocket: WebSocket, token: str) -> None:
             SELECT id::text, name, status, runtime_version,
                    capabilities, last_seen::text, created_at::text
             FROM agents
-            WHERE owner_id = $1::uuid
+            WHERE owner_id = $1::uuid AND deleted_at IS NULL
             ORDER BY name
             """,
             user_id,

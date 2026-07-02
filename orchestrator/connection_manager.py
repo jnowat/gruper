@@ -63,6 +63,19 @@ class ConnectionManager:
             logger.warning("Failed to send message to agent %s — disconnecting", agent_id)
             self.disconnect(agent_id)
 
+    async def close_agent_ws(self, agent_id: str, reason: str) -> None:
+        """Server-side close of a live agent connection (e.g. the agent was
+        deleted). The runtime sees the close, reconnects, gets its register
+        rejected, and shuts itself down — so deletion works even for agents
+        this orchestrator's console never spawned."""
+        conn = self._agent_connections.pop(agent_id, None)
+        if conn is None:
+            return
+        try:
+            await conn.websocket.close(code=4404, reason=reason)
+        except Exception:
+            logger.warning("Could not close WS for agent %s cleanly", agent_id)
+
     # ── Console connections ────────────────────────────────────────────────────
 
     def connect_console(self, user_id: str, websocket: WebSocket) -> None:

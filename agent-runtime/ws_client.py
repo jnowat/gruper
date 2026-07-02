@@ -36,6 +36,19 @@ logger = logging.getLogger(__name__)
 _BACKOFF = [2, 4, 8, 16]
 
 
+class RegistrationRejected(RuntimeError):
+    """The orchestrator explicitly refused this agent's register frame.
+
+    Every register rejection is identity-level and permanent ("agent not
+    found", "forbidden", "agent deleted") — retrying can never succeed, so
+    the runtime treats it as fatal and shuts down instead of hammering the
+    orchestrator with a doomed reconnect every 16 seconds forever. This is
+    also what makes DELETE /v1/agents/{id} stick for a still-running agent:
+    the orchestrator closes its socket, the reconnect's register is
+    rejected, and the process exits.
+    """
+
+
 class AgentWSClient:
     def __init__(self) -> None:
         self._ollama = OllamaClient(settings.ollama_url)
@@ -60,6 +73,13 @@ class AgentWSClient:
                 await self._connect()
                 attempt = 0
             except asyncio.CancelledError:
+                break
+            except RegistrationRejected as exc:
+                logger.error(
+                    "Orchestrator permanently rejected this agent's registration (%s) — shutting down",
+                    exc,
+                )
+                self._running = False
                 break
             except Exception as exc:
                 if not self._running:
@@ -116,7 +136,7 @@ class AgentWSClient:
         if msg.get("type") == "registered":
             logger.info("Registered with orchestrator (agent_id=%s)", settings.agent_id)
         elif msg.get("type") == "error":
-            raise RuntimeError(f"Registration rejected: {msg.get('detail')}")
+            raise RegistrationRejected(str(msg.get("detail")))
         else:
             raise RuntimeError(f"Unexpected registration response: {msg}")
 

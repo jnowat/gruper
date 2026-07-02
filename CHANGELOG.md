@@ -6,6 +6,38 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## Gruper Distributed — `gd-0.2.x` (2026-07-02) — Lifecycle Reliability: no more ghost agents, zombie tasks, or silent failures
+
+Driven by a real Windows testing session whose debug log told one story: agents that looked "ready" but were long dead. Agent statuses live in `orchestrator.db`, which outlives every console install and orchestrator restart — and nothing ever reset them. The heartbeat watchdog only inspects connections it knows about, so a stale `idle` row was invisible to every cleanup path. Everything else cascaded from that lie: Round Table seated dead agents (turns queued forever, Ollama never engaged, "couldn't respond this time"), removal was refused ("it can be removed once it goes offline" — which never happened), and tasks piled up as unclearable "queued" zombies.
+
+**Truthful agent presence (the root-cause fix):**
+- FIXED: orchestrator startup now sweeps every non-offline agent to `offline` — no WebSocket can survive a restart, so any `idle`/`busy` row at boot is definitionally a leftover
+- FIXED: the heartbeat watchdog now broadcasts a `fleet_event` when it marks an agent offline (previously it updated the database silently, so every open console kept the green "ready" dot forever)
+- FIXED: the task-timeout watchdog now broadcasts `task_complete` to the submitter's consoles, so an open answer view stops saying "answering…" for a task the orchestrator already gave up on
+
+**Agents can actually be removed:**
+- ADDED: `DELETE /v1/agents/{id}` (owner-scoped soft delete, migration 005 `deleted_at`): the agent leaves every listing, can't take new tasks, can't re-register; a live connection is closed server-side; its queued/in-flight work is failed with error `agent_removed` (and broadcast) instead of stranding
+- CHANGED: agent-runtime treats a rejected registration as **fatal** and exits (was: doomed reconnect every 16s forever) — this is what makes deletion stick even for agents this console never spawned
+- CHANGED: the console's ✕ now stops the local process best-effort and then deletes server-side — the "wasn't started by this app, so it can't be stopped" dead end is gone, along with the localStorage hidden-agents workaround it forced
+
+**Tasks can actually be deleted (and cancelled):**
+- ADDED: `DELETE /v1/tasks/{id}` — for a `pending` task this is a full cancel (the escape hatch for a question queued to an agent that never returns); dispatched/running refused with 409
+- ADDED: `DELETE /v1/tasks?scope=failed|all` — the History "Clear" buttons now really delete server-side; "old tasks reappear in every new build" is fixed by making Clear mean clear (in-flight work is never touched)
+- ADDED: a Cancel button on queued questions in the answer view
+
+**Round Table reliability:**
+- ADDED: pre-flight roster check — the fleet is re-fetched over REST before anyone is seated, so a stale snapshot can't send a round of turns into the void; "No one at the table is reachable" instead of three minutes of silence
+- ADDED: fail-fast on turns that are never picked up — a turn still `pending` after 12s is cancelled server-side and marked failed with a pointed message ("isn't picking up work — check its dot"), instead of stalling the table for the full deadline
+- CHANGED: failed turns now say **why**: never dispatched / Ollama unreachable / ran out of time / lost connection / agent removed — no more one-size-fits-all "couldn't respond this time"
+- CHANGED: turn polling backs off (0.8s → 2.5s after 15s), ending the constant `GET /v1/tasks/…` spam in the debug log
+
+**Fleet identity:**
+- ADDED: leftover generic "Local Agent" entries show a one-click "✎ Give this agent a real name" nudge on the card
+
++13 orchestrator tests (61 total): agent delete (listing / owner scoping / outstanding-task failing / register rejection / live-connection kick), task delete (cancel, 409-while-running, bulk scopes), and the startup sweep.
+
+---
+
 ## Gruper Distributed — `gd-0.2.x` (2026-07-01) — Desktop Experience Overhaul
 
 A structural pass at the Console's single-user experience, going after the root causes behind three rounds of recurring Windows-testing feedback (agent identity, model confusion, technical leaks, mechanical Round Table, weak first-run) rather than another layer of label polish.

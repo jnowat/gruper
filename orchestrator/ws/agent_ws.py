@@ -36,7 +36,7 @@ _STATUS_EVENT = {
 }
 
 
-async def _broadcast_fleet_event(
+async def broadcast_fleet_event(
     pool: Database, agent_id: str, owner_id: str, event: str, status: str
 ) -> None:
     """Push a fleet_event to every console owned by the agent's owner.
@@ -188,7 +188,7 @@ async def _cleanup_on_disconnect(pool: Database, agent_id: str, user_id: str) ->
         await append_event(pool, actor_id=user_id, action="agent.disconnected", subject_id=agent_id)
     except Exception:
         logger.warning("Could not append disconnect event for agent %s", agent_id)
-    await _broadcast_fleet_event(pool, agent_id, user_id, "agent_offline", "offline")
+    await broadcast_fleet_event(pool, agent_id, user_id, "agent_offline", "offline")
     logger.info("Agent %s offline (owner=%s)", agent_id, user_id)
 
 
@@ -209,7 +209,7 @@ async def _handle_register(
         return
 
     row = await pool.fetchrow(
-        "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid",
+        "SELECT id::text, owner_id::text, deleted_at::text FROM agents WHERE id = $1::uuid",
         agent_id,
     )
 
@@ -219,6 +219,17 @@ async def _handle_register(
 
     if row["owner_id"] != user_id:
         await websocket.send_json({"type": "error", "detail": "forbidden"})
+        return
+
+    if row["deleted_at"]:
+        # The agent was removed via DELETE /v1/agents/{id}. Rejecting the
+        # registration is what makes deletion stick for a runtime process
+        # that is still alive somewhere: it treats this as fatal and exits
+        # (see agent-runtime/ws_client.py RegistrationRejected).
+        await websocket.send_json({
+            "type": "error",
+            "detail": "agent deleted — this agent was removed and can no longer connect",
+        })
         return
 
     if manager.is_connected(agent_id):
@@ -247,7 +258,7 @@ async def _handle_register(
 
     # Tell the owner's console(s) the agent is live now (the initial
     # fleet_snapshot was sent when the console connected, possibly before this).
-    await _broadcast_fleet_event(pool, agent_id, user_id, "agent_registered", "idle")
+    await broadcast_fleet_event(pool, agent_id, user_id, "agent_registered", "idle")
 
     # Drain any tasks that arrived while this agent was offline.
     await dispatch_pending_for_agent(pool, manager, agent_id)
@@ -282,7 +293,7 @@ async def _handle_status_update(
         subject_id=agent_id,
         metadata={"status": new_status},
     )
-    await _broadcast_fleet_event(
+    await broadcast_fleet_event(
         pool, agent_id, user_id,
         _STATUS_EVENT.get(new_status, "agent_heartbeat"), new_status,
     )

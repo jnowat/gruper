@@ -11,7 +11,6 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { get } from 'svelte/store';
   import { authStore } from '$lib/stores/auth.js';
   import { fleetStore } from '$lib/stores/fleet.js';
   import { tasksStore } from '$lib/stores/tasks.js';
@@ -92,10 +91,8 @@
       .then(([agentList, taskList]) => {
         fleetStore.setSnapshot(agentList);
         tasksStore.setTasks(taskList);
-        // Default-select from the VISIBLE fleet (the raw REST list still
-        // contains locally-hidden agents).
-        if (!activeAgentId) {
-          activeAgentId = get(fleetStore)[0]?.id ?? null;
+        if (agentList.length > 0 && !activeAgentId) {
+          activeAgentId = agentList[0].id;
         }
       })
       .catch((err: unknown) => console.warn('[Console] Initial data load failed:', err))
@@ -143,38 +140,59 @@
   }
 
   /**
-   * "Remove" an agent (see ROADMAP.md WP-32.1): stop the locally-spawned
-   * process if it's running, then hide the entry (persisted locally). There is
-   * no orchestrator DELETE endpoint for agents, so the row survives server-side
-   * — but it no longer clutters the sidebar, which is what the user meant by ✕.
+   * Remove an agent for real: best-effort stop of the locally-spawned
+   * process, then DELETE on the orchestrator. The server side does the rest —
+   * the row leaves every listing, queued work is failed with a clear reason,
+   * a live connection is kicked, and a runtime this console never spawned
+   * exits on its own when its re-register is rejected. No ghost entries.
    */
   async function removeAgent(id: string) {
     agentActionError = null;
     const agent = agents.find((a) => a.id === id);
-    if (agent && agent.status !== 'offline') {
-      if (!hasTauri) {
-        agentActionError = 'Stopping a running agent requires the desktop app.';
-        return;
-      }
+    if (agent && agent.status !== 'offline' && hasTauri) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         await invoke('stop_local_agent', { agentId: id });
         fleetStore.setOffline(id);
       } catch (err) {
-        // Most common cause: the agent wasn't started by this Console (manual
-        // runtime, another machine), so this process can't stop it — and
-        // hiding a still-running agent would be a lie (it would pop back on
-        // its next heartbeat anyway). Say so plainly; raw detail goes to the
-        // debug log.
+        // Not fatal: an agent this console didn't spawn can't be stopped from
+        // here, but the DELETE below still removes it — the orchestrator
+        // closes its connection and its own runtime shuts down.
         const raw = err instanceof Error ? err.message : String(err);
-        logStore.frontend('warn', 'ui', `stop_local_agent failed: ${raw}`, { agent_id: id });
-        agentActionError = `${agent.name} wasn't started by this app, so it can't be stopped from here. Stop it where it runs — it can be removed once it goes offline.`;
-        return;
+        logStore.frontend('info', 'ui', `stop_local_agent skipped: ${raw}`, { agent_id: id });
       }
     }
-    fleetStore.hide(id);
-    if (activeAgentId === id) activeAgentId = agents.find((a) => a.id !== id)?.id ?? null;
-    logStore.frontend('info', 'ui', 'agent removed from sidebar (stopped + hidden locally)', { agent_id: id });
+    const token = authStore.getToken();
+    if (!token) return;
+    try {
+      const client = new OrchestratorClient(authStore.getOrchestratorUrl(), token);
+      await client.deleteAgent(id);
+      fleetStore.remove(id);
+      if (activeAgentId === id) activeAgentId = agents.find((a) => a.id !== id)?.id ?? null;
+      logStore.frontend('info', 'ui', 'agent removed', { agent_id: id });
+    } catch (err) {
+      agentActionError = `Couldn't remove ${agent?.name ?? 'the agent'}: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  /** History "Clear" buttons — real, server-side deletion (the old
+      session-only clear meant every task ever submitted came back on the
+      next launch). */
+  async function clearTasks(scope: 'failed' | 'all') {
+    const token = authStore.getToken();
+    if (!token) return;
+    try {
+      const client = new OrchestratorClient(authStore.getOrchestratorUrl(), token);
+      const { deleted } = await client.deleteTasks(scope);
+      if (scope === 'failed') tasksStore.clearFailed();
+      else {
+        activeTaskId = null;
+        tasksStore.clearFinished();
+      }
+      logStore.frontend('info', 'ui', `deleted ${deleted} task(s) (scope=${scope})`);
+    } catch (err) {
+      logStore.frontend('warn', 'ui', `bulk task delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async function renameAgent(id: string, name: string) {
@@ -334,17 +352,17 @@
           <div class="px-3 py-1 flex items-center gap-3 border-b border-white/5">
             {#if visibleTasks.some((t) => t.status === 'failed' || t.status === 'timed_out' || t.status === 'dead_letter')}
               <button
-                onclick={() => tasksStore.clearFailed()}
+                onclick={() => clearTasks('failed')}
                 class="text-xs text-slate-500 hover:text-amber-400 transition-colors"
-                title="Remove failed questions from this list"
+                title="Permanently delete the questions that failed"
               >
                 Clear failed
               </button>
             {/if}
             <button
-              onclick={() => { activeTaskId = null; tasksStore.clearAll(); }}
+              onclick={() => clearTasks('all')}
               class="text-xs text-slate-500 hover:text-red-400 transition-colors"
-              title="Empty this list. Answers stay saved and come back the next time you open the app."
+              title="Permanently delete all finished questions and their answers. Anything still being answered stays."
             >
               Clear all
             </button>
@@ -472,6 +490,7 @@
                 agentName={activeTaskAgentName}
                 agentRoleId={activeTaskAgent ? agentRole(activeTaskAgent) : null}
                 onResubmitted={(id) => { activeTaskId = id; }}
+                onCancelled={() => { activeTaskId = null; }}
               />
             {/if}
           {:else if detailTab === 'roundtable'}

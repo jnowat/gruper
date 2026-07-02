@@ -2,13 +2,15 @@ import logging
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from ..connection_manager import manager
 from ..database import append_event
 from ..db import Database, Row
 from ..db.util import is_valid_uuid, new_id, now_iso, ts_or_none
 from ..security import get_current_user_id
+from ..ws.agent_ws import broadcast_fleet_event
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +140,9 @@ async def list_agents(
 ) -> list[AgentResponse]:
     pool: Database = request.app.state.pool
     rows = await pool.fetch(
-        f"SELECT {_SELECT_COLS} FROM agents WHERE owner_id = $1 ORDER BY created_at DESC",
+        f"""SELECT {_SELECT_COLS} FROM agents
+            WHERE owner_id = $1 AND deleted_at IS NULL
+            ORDER BY created_at DESC""",
         user_id,
     )
     return [_row_to_response(r) for r in rows]
@@ -200,7 +204,8 @@ async def update_agent(
     pool: Database = request.app.state.pool
 
     existing = await pool.fetchrow(
-        f"SELECT {_SELECT_COLS} FROM agents WHERE id = $1::uuid AND owner_id = $2",
+        f"""SELECT {_SELECT_COLS} FROM agents
+            WHERE id = $1::uuid AND owner_id = $2 AND deleted_at IS NULL""",
         agent_id,
         user_id,
     )
@@ -239,6 +244,94 @@ async def update_agent(
         "Agent %s updated (name=%r, role=%r, owner=%s)", agent_id, name, body.role, user_id
     )
     return _row_to_response(row)
+
+
+@router.delete(
+    "/{agent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove an agent (owner only)",
+)
+async def delete_agent(
+    agent_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+) -> Response:
+    """Soft-delete an agent so a user can actually clean up their fleet.
+
+    The row survives (tasks reference assigned_agent_id and the audit trail
+    must stay coherent) but the agent disappears from every listing, cannot
+    be assigned new tasks, and cannot re-register over the WebSocket — a
+    still-running runtime process gets its connection closed here, then its
+    re-register rejected, which it treats as fatal and exits. Whatever work
+    was still queued or in flight for it is failed with a clear error so no
+    task is left waiting forever on an agent that no longer exists.
+
+    Owner-scoped: a non-owner (or a bad/already-deleted id) gets an
+    indistinguishable 404.
+    """
+    if not is_valid_uuid(agent_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
+    pool: Database = request.app.state.pool
+
+    row = await pool.fetchrow(
+        """SELECT id::text, name FROM agents
+           WHERE id = $1::uuid AND owner_id = $2 AND deleted_at IS NULL""",
+        agent_id,
+        user_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="agent not found")
+
+    now = now_iso()
+    await pool.execute(
+        "UPDATE agents SET deleted_at = $2, status = 'offline' WHERE id = $1::uuid",
+        agent_id,
+        now,
+    )
+
+    # Fail this agent's outstanding work BEFORE closing its socket: the
+    # disconnect cleanup requeues dispatched/running tasks, and requeuing to
+    # a deleted agent would strand them as pending forever.
+    failed_tasks = await pool.fetch(
+        """
+        UPDATE tasks SET status = 'failed', completed_at = $2, error = $3::jsonb
+        WHERE assigned_agent_id = $1::uuid
+          AND status IN ('pending', 'dispatched', 'running')
+        RETURNING id::text, submitter_id::text
+        """,
+        agent_id,
+        now,
+        {"code": "agent_removed", "message": "The agent was removed before this question could be answered"},
+    )
+    for t in failed_tasks:
+        await manager.broadcast_to_user(t["submitter_id"], {
+            "type": "task_complete",
+            "payload": {
+                "task_id": t["id"],
+                "agent_id": agent_id,
+                "final_status": "failed",
+                "duration_ms": None,
+                "model_used": None,
+                "error_code": "agent_removed",
+                "output_preview": None,
+            },
+        })
+
+    await manager.close_agent_ws(agent_id, "agent deleted")
+
+    await append_event(
+        pool,
+        actor_id=user_id,
+        action="agent.deleted",
+        subject_id=agent_id,
+        metadata={"name": row["name"], "failed_tasks": len(failed_tasks)},
+    )
+    await broadcast_fleet_event(pool, agent_id, user_id, "agent_deleted", "offline")
+    logger.info(
+        "Agent %s deleted (owner=%s, %d outstanding task(s) failed)",
+        agent_id, user_id, len(failed_tasks),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _row_to_response(row: Row) -> AgentResponse:
