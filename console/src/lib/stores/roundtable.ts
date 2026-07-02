@@ -31,6 +31,8 @@ export interface DiscussionTurn {
   role: string | null;
   model: string | null;
   text: string;
+  /** Live status note while thinking ("contacting Ollama…"). */
+  note: string | null;
   status: 'thinking' | 'streaming' | 'done' | 'failed';
 }
 
@@ -75,10 +77,11 @@ function createRoundTableStore() {
   });
 
   // Set by stop(); checked between turns and on every poll so a running
-  // discussion can always be cut short. The underlying task keeps running
-  // server-side (there is no abort channel until WP-08) — only the UI stops
-  // waiting for it.
+  // discussion can always be cut short. The current turn's task is also
+  // revoked server-side, which makes the agent abort its Ollama call.
   let stopRequested = false;
+  // The task id of the turn currently being waited on (for revoke-on-stop).
+  let currentTaskId: string | null = null;
 
   function patchTurn(idx: number, patch: Partial<DiscussionTurn>) {
     store.update((s) => {
@@ -88,17 +91,25 @@ function createRoundTableStore() {
     });
   }
 
-  /** A failed turn says WHY — "couldn't respond" hid three very different
-      problems (never dispatched / model error / too slow) behind one string. */
+  /** A failed turn says WHY — "couldn't respond" hid several very different
+      problems (never dispatched / Ollama down / missing model / too slow)
+      behind one string. Codes come from agent-runtime/ollama_client.py. */
   function turnFailureText(
     name: string,
     status: string,
     error: { code?: string; message?: string } | null,
   ): string {
+    if (error?.code === 'revoked') return `${name} was stopped.`;
     if (status === 'timed_out') return `${name} ran out of time before finishing.`;
     if (status === 'dead_letter') return `${name} kept losing its connection, so its turn was skipped.`;
-    if (error?.code === 'ollama_error') {
-      return `${name} couldn't reach its model (Ollama) — is Ollama still running?`;
+    if (error?.code === 'ollama_unreachable') {
+      return `${name} can't reach Ollama — is it still running?`;
+    }
+    if (error?.code === 'model_not_found') {
+      return error.message ?? `${name}'s model isn't installed in Ollama any more.`;
+    }
+    if (error?.code === 'ollama_timeout') {
+      return `${name}'s model took too long to respond.`;
     }
     if (error?.code === 'agent_removed') return `${name} was removed mid-discussion.`;
     return `${name} hit a problem${error?.message ? `: ${error.message}` : ' and couldn’t respond.'}`;
@@ -142,6 +153,7 @@ function createRoundTableStore() {
         timeout_s: TURN_TIMEOUT_S,
       });
       const taskId = task.id;
+      currentTaskId = taskId;
       try {
         const started = Date.now();
         const deadline = started + TURN_DEADLINE_MS;
@@ -155,10 +167,22 @@ function createRoundTableStore() {
             return;
           }
           // Live streaming: the console WS routes this task's progress into
-          // tasksStore.progress (keyed by task id), so concatenate it as it grows.
+          // tasksStore.progress (keyed by task id). Output text becomes the
+          // turn; step-only frames ("contacting Ollama…") become the note
+          // shown while thinking.
           const prog = get(tasksStore).progress[taskId];
           if (prog?.length) {
-            patchTurn(idx, { text: prog.map((l) => l.text).join(''), status: 'streaming' });
+            const text = prog.map((l) => l.text).join('');
+            if (text) {
+              patchTurn(idx, { text, status: 'streaming' });
+            } else {
+              for (let i = prog.length - 1; i >= 0; i--) {
+                if (prog[i].step) {
+                  patchTurn(idx, { note: prog[i].step });
+                  break;
+                }
+              }
+            }
           }
           // Authoritative terminal check + full result.
           const t = await client.getTask(taskId);
@@ -203,6 +227,7 @@ function createRoundTableStore() {
         });
         patchTurn(idx, { text: `${a.name} ran out of time before finishing.`, status: 'failed' });
       } finally {
+        currentTaskId = null;
         // The streamed chunks live in tasksStore.progress; once the turn is
         // settled the transcript holds the text, so free the buffer — a long
         // multi-agent session would otherwise grow it without bound.
@@ -271,6 +296,7 @@ function createRoundTableStore() {
                 role: agentRole(a),
                 model: agentModel(a),
                 text: '',
+                note: null,
                 status: 'thinking' as const,
               },
             ],
@@ -324,7 +350,7 @@ function createRoundTableStore() {
         ...s,
         transcript: [
           ...s.transcript,
-          { kind: 'user', agentId: null, name: 'You', role: null, model: null, text, status: 'done' },
+          { kind: 'user', agentId: null, name: 'You', role: null, model: null, text, note: null, status: 'done' },
         ],
       }));
       logStore.frontend('info', 'ui', `round table: user message, ${get(store).participants.size} participant(s)`);
@@ -338,10 +364,19 @@ function createRoundTableStore() {
       await runAgents(agents);
     },
 
-    /** Cut a running discussion short (takes effect within one poll tick). */
+    /** Cut a running discussion short (takes effect within one poll tick).
+        The current turn's task is revoked, so the agent actually aborts its
+        Ollama call instead of finishing an answer nobody will see. */
     stop() {
       if (!get(store).running) return;
       stopRequested = true;
+      const auth = get(authStore);
+      if (currentTaskId && auth.token) {
+        const client = new OrchestratorClient(auth.orchestratorUrl, auth.token);
+        client.revokeTask(currentTaskId).catch(() => {
+          // Best-effort — the polling loop stops either way.
+        });
+      }
       logStore.frontend('info', 'ui', 'round table: stopped by user');
     },
 

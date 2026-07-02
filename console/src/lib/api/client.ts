@@ -89,6 +89,18 @@ export class OrchestratorClient {
   }
 
   /**
+   * Stop a task the agent is actively working on: the orchestrator settles it
+   * immediately (error code 'revoked') and tells the agent to abort its
+   * Ollama call.
+   */
+  revokeTask(id: string, reason?: string): Promise<Task> {
+    return this._fetch<Task>(`/v1/tasks/${id}/revoke`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+  }
+
+  /**
    * Bulk-delete tasks server-side. 'failed' = failed/timed-out/unreachable;
    * 'all' = everything not actively being worked on.
    */

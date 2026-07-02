@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     jwt_expire_minutes: int = 60
 
     # Orchestrator identity
-    orchestrator_version: str = "gd-0.1.0"
+    orchestrator_version: str = "gd-0.3.0"
 
     # Heartbeat watchdog
     heartbeat_timeout_s: int = 90

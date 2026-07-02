@@ -124,11 +124,34 @@ async def sweep_stale_agent_statuses(pool) -> int:
     return len(rows)
 
 
+async def purge_deleted_agents(pool) -> int:
+    """Hard-delete soft-deleted agents whose task history is gone.
+
+    Soft delete exists only because tasks reference assigned_agent_id; once a
+    deleted agent's last task has been cleared (History "Clear all", single
+    deletes), nothing references the row and keeping it is pure data-model
+    debt. Runs once at startup, so the agents table converges back to only
+    the rows that mean something.
+    """
+    rows = await pool.fetch(
+        """
+        DELETE FROM agents
+        WHERE deleted_at IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.assigned_agent_id = agents.id)
+        RETURNING id::text
+        """
+    )
+    if rows:
+        logger.info("Purged %d soft-deleted agent(s) with no remaining tasks", len(rows))
+    return len(rows)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     pool = await init_db(settings.database_url)
     await run_migrations(pool)
     await sweep_stale_agent_statuses(pool)
+    await purge_deleted_agents(pool)
     app.state.pool = pool
 
     watchdog = asyncio.create_task(_heartbeat_watchdog())

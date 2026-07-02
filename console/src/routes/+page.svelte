@@ -19,8 +19,9 @@
   import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
   import { ConsoleWS } from '$lib/ws/console_ws.js';
-  import { taskStatusColour, taskStatusLabel } from '$lib/taskDisplay.js';
+  import { taskDisplayStatus } from '$lib/taskDisplay.js';
   import { agentRole } from '$lib/agentDisplay.js';
+  import { EXPECTED_ENGINE_VERSION } from '$lib/version.js';
   import ConnectDialog from '$lib/components/ConnectDialog.svelte';
   import AddAgentDialog from '$lib/components/AddAgentDialog.svelte';
   import AgentCard from '$lib/components/AgentCard.svelte';
@@ -40,6 +41,7 @@
   let showComposer = $state(false);
   let showDebug = $state(false);
   let agentActionError = $state<string | null>(null);
+  let staleEngineVersion = $state<string | null>(null);
 
   const hasTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -87,6 +89,24 @@
 
     loadingData = true;
     const client = new OrchestratorClient(auth.orchestratorUrl, token);
+
+    // Version-skew check: the Tauri shell adopts any orchestrator already on
+    // the port — including one left behind by a previous install, in which
+    // case every server-side fix in this build is silently absent. Surface
+    // that loudly instead of letting "the fixed bug is still happening"
+    // erode trust in updates.
+    client.getHealth()
+      .then((health) => {
+        if (health.version !== EXPECTED_ENGINE_VERSION) {
+          staleEngineVersion = health.version;
+          logStore.frontend('warn', 'ui',
+            `engine version mismatch: running ${health.version}, this app ships ${EXPECTED_ENGINE_VERSION}`);
+        } else {
+          staleEngineVersion = null;
+        }
+      })
+      .catch(() => { /* health check is best-effort */ });
+
     Promise.all([client.listAgents(), client.listTasks()])
       .then(([agentList, taskList]) => {
         fleetStore.setSnapshot(agentList);
@@ -285,6 +305,14 @@
       </div>
     </header>
 
+    {#if staleEngineVersion}
+      <div class="flex-shrink-0 px-4 py-2 bg-amber-500/10 border-b border-amber-500/30 text-amber-300 text-xs">
+        The engine that's running is from an older install ({staleEngineVersion} — this app ships {EXPECTED_ENGINE_VERSION}),
+        so recent fixes aren't active. Close every Gruper window and relaunch; if this message keeps
+        appearing, restart your computer.
+      </div>
+    {/if}
+
     <!-- Three-pane content -->
     <div class="flex-1 flex min-h-0">
 
@@ -378,7 +406,7 @@
                 <span class="text-xs text-white truncate flex-1">
                   {task.input?.prompt?.slice(0, 60) ?? '—'}
                 </span>
-                <span class="text-xs flex-shrink-0 {taskStatusColour(task.status)}">{taskStatusLabel(task.status)}</span>
+                <span class="text-xs flex-shrink-0 {taskDisplayStatus(task).colour}">{taskDisplayStatus(task).label}</span>
               </div>
               <p class="text-xs text-slate-600 mt-0.5 truncate flex items-center gap-1">
                 {#if task.assigned_agent_id && agentNameFor(task.assigned_agent_id)}

@@ -5,19 +5,31 @@ Connection lifecycle
 --------------------
 1. Connect to orchestrator with JWT in query string.
 2. Send {"type": "register", "agent_id": "<uuid>"} and wait for "registered".
-3. Drain the offline queue (tasks that accumulated while disconnected).
-4. Run the heartbeat loop (every HEARTBEAT_INTERVAL_S seconds).
-5. Dispatch incoming "task_push" frames to the task executor.
+3. Start the heartbeat loop IMMEDIATELY (every HEARTBEAT_INTERVAL_S seconds) —
+   nothing may run between register and the first heartbeats, or a slow step
+   gets this agent killed by the orchestrator's 90 s heartbeat watchdog.
+4. Run a quick Ollama preflight (reachability + installed models) so the log
+   says up front whether tasks can actually run.
+5. Dispatch incoming "task_push" / "revoke" frames.
 6. On disconnect, cancel the heartbeat task and retry with exponential backoff:
    2 s → 4 s → 8 s → 16 s → 16 s … (mirrors Gruper core's retry schedule).
 
-Graceful shutdown
------------------
-Call stop(). In-flight asyncio tasks are cancelled and their payloads are
-checkpointed to the offline queue so they are retried on reconnect.
+Interrupted work
+----------------
+The orchestrator is the single source of truth for retries: when this agent
+disconnects, it requeues the agent's dispatched/running tasks and re-pushes
+them on the next register. The runtime therefore does NOT re-execute work
+from its local queue any more — a previous version checkpointed tasks locally
+and re-ran the backlog on every reconnect, which duplicated the orchestrator's
+own requeue (double execution), burned Ollama on tasks whose results were
+rejected as stale, and — because the drain ran between register and the first
+heartbeat — could starve heartbeats long enough that the orchestrator killed
+the connection mid-drain and the whole cycle repeated. Leftover local queue
+entries from older builds are discarded at startup with a log line.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -28,7 +40,7 @@ from websockets.exceptions import ConnectionClosed
 from circuit_breaker import CircuitBreaker
 from config import settings
 from offline_queue import OfflineQueue
-from ollama_client import OllamaClient
+from ollama_client import OllamaClient, OllamaError
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +73,28 @@ class AgentWSClient:
         self._running = False
         self._heartbeat_task: asyncio.Task | None = None
         self._in_flight: dict[str, asyncio.Task] = {}
+        # Task ids cancelled via an orchestrator "revoke" frame — the contract
+        # says no result may be sent for these (see wss-messages.schema.json).
+        self._revoked: set[str] = set()
+        # Serialize Ollama calls (default 1): on modest desktop hardware,
+        # running several models concurrently thrashes RAM and makes every
+        # answer slower than running them back to back.
+        self._ollama_sem = asyncio.Semaphore(max(1, settings.ollama_max_concurrency))
 
     # ── Public interface ──────────────────────────────────────────────────────
 
     async def start(self) -> None:
         await self._queue.open()
+        # See the module docstring: local re-execution is retired; the
+        # orchestrator's requeue-on-disconnect is the single retry path.
+        leftover = await self._queue.size()
+        if leftover:
+            logger.warning(
+                "Discarding %d checkpointed task(s) from a previous run — "
+                "the orchestrator re-dispatches interrupted work itself",
+                leftover,
+            )
+            await self._queue.clear()
         self._running = True
         attempt = 0
         while self._running:
@@ -91,7 +120,7 @@ class AgentWSClient:
                 attempt += 1
                 await asyncio.sleep(delay)
 
-        await self._checkpoint_in_flight()
+        await self._cancel_in_flight()
         await self._queue.close()
         logger.info("Agent runtime stopped cleanly")
 
@@ -113,9 +142,16 @@ class AgentWSClient:
         async with websockets.connect(url) as ws:
             self._ws = ws
             await self._register(ws)
-            await self._drain_queue()
+            # Heartbeats start before anything else — a slow step here would
+            # get this agent declared dead by the orchestrator's watchdog.
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(ws))
             try:
+                # Registering resets this agent to 'idle' orchestrator-side;
+                # if the breaker is open that's a lie — re-assert degraded so
+                # the fleet never shows a green dot on a struggling agent.
+                if self._cb.is_open:
+                    await self._send({"type": "status_update", "status": "degraded"})
+                await self._preflight_ollama()
                 async for raw in ws:
                     await self._dispatch(raw)
             finally:
@@ -148,15 +184,46 @@ class AgentWSClient:
             except ConnectionClosed:
                 break
 
-    # ── Queue drain ───────────────────────────────────────────────────────────
+    # ── Ollama preflight ──────────────────────────────────────────────────────
 
-    async def _drain_queue(self) -> None:
-        count = await self._queue.size()
-        if count == 0:
+    async def _preflight_ollama(self) -> None:
+        """Log up front whether tasks can actually run.
+
+        Cheap (one GET with a 10 s cap) and purely diagnostic: it never blocks
+        registration or task flow, but it turns "agent looks fine yet nothing
+        ever reaches Ollama" from a mystery into two obvious log lines —
+        unreachable endpoint, or a configured model that is no longer
+        installed.
+        """
+        caps = settings.capabilities_dict()
+        configured = caps.get("models") or []
+        default_model = (caps.get("default_model") or "").strip() or (
+            configured[0] if configured else None
+        )
+        try:
+            installed = await self._ollama.list_models()
+        except Exception as exc:
+            logger.error(
+                "Ollama preflight FAILED: %s is unreachable (%s) — every task will fail "
+                "until Ollama is running there",
+                settings.ollama_url,
+                exc,
+            )
             return
-        logger.info("Draining %d queued task(s)", count)
-        async for task_id, payload in self._queue.drain():
-            await self._run_task(task_id, payload, from_queue=True)
+        logger.info(
+            "Ollama preflight OK: %d model(s) installed at %s",
+            len(installed),
+            settings.ollama_url,
+        )
+        if default_model and default_model not in installed:
+            logger.error(
+                'Ollama preflight: this agent\'s model "%s" is NOT installed '
+                '(installed: %s) — tasks will fail until you run "ollama pull %s" '
+                "or change the agent's model",
+                default_model,
+                ", ".join(installed) or "none",
+                default_model,
+            )
 
     # ── Incoming message dispatch ─────────────────────────────────────────────
 
@@ -176,9 +243,22 @@ class AgentWSClient:
             if not task_id:
                 logger.warning("task_push received with no task.id — ignored")
                 return
-            runner = asyncio.create_task(self._run_task(task_id, task, from_queue=False))
+            runner = asyncio.create_task(self._run_task(task_id, task))
             self._in_flight[task_id] = runner
             runner.add_done_callback(lambda _: self._in_flight.pop(task_id, None))
+        elif msg_type == "revoke":
+            # {"type":"revoke", ..., "payload":{"task_id":...,"reason":...}} —
+            # abort the in-flight task; per the contract, NO result frame may
+            # follow for a revoked task (the orchestrator already settled it).
+            payload = msg.get("payload") or {}
+            task_id = payload.get("task_id") or msg.get("task_id") or ""
+            runner = self._in_flight.get(task_id)
+            if runner:
+                self._revoked.add(task_id)
+                runner.cancel()
+                logger.info("Task %s revoked by orchestrator — aborting Ollama call", task_id)
+            else:
+                logger.info("Revoke for unknown/finished task %s — nothing to abort", task_id)
         elif msg_type in ("registered", "heartbeat_ack"):
             pass  # 'registered' is consumed in _register; heartbeat_ack needs no action
         elif msg_type == "error":
@@ -188,44 +268,95 @@ class AgentWSClient:
 
     # ── Task execution ────────────────────────────────────────────────────────
 
-    async def _run_task(
-        self, task_id: str, task: dict, *, from_queue: bool
-    ) -> None:
+    async def _run_task(self, task_id: str, task: dict) -> None:
         """Execute one task: ack → stream from Ollama → report result.
 
         `task` is the full Task record from the orchestrator's task_push
         (task["input"] is a TaskInputPlaintext: prompt/system_prompt/
-        role_template/model_preferences). The same shape is checkpointed to the
-        offline queue, so drained tasks re-enter here unchanged.
+        role_template/model_preferences).
         """
-        if self._cb.is_open:
-            logger.warning("Circuit open — queuing task %s", task_id)
-            if not from_queue:
-                await self._queue.enqueue(task_id, task)
-            return
-
         # Acknowledge receipt FIRST: the orchestrator only transitions the task
         # dispatched → running on task_ack, and rejects results for tasks that
-        # are not 'running'. Skipping this silently drops the result.
+        # are not 'running'. Skipping this silently drops the result — and it
+        # must precede the circuit check so a fast failure below is accepted.
         await self._send({"type": "task_ack", "task_id": task_id})
+
+        # Circuit open (and not yet due for a half-open trial): fail FAST with
+        # a specific reason. A previous version silently queued the task here,
+        # which left the user staring at "thinking…" while nothing would ever
+        # reach Ollama.
+        if not self._cb.should_attempt():
+            logger.warning("Circuit open — failing task %s fast", task_id)
+            await self._send({
+                "type": "result",
+                "task_id": task_id,
+                "status": "failed",
+                "error": {
+                    "code": "ollama_unreachable",
+                    "message": (
+                        f"Ollama has been failing repeatedly — check that it is running "
+                        f"at {settings.ollama_url}. This agent retries automatically."
+                    ),
+                },
+            })
+            return
 
         task_input = task.get("input") or {}
         model, options = self._model_and_options(task_input)
         messages = self._build_messages(task_input)
         started = time.monotonic()
 
+        async def _step(text: str) -> None:
+            """Progress frame with a step note (no output text) — turns the
+            silent pre-first-token window into visible, honest status."""
+            await self._send({
+                "type": "progress",
+                "task_id": task_id,
+                "step": text,
+                "elapsed_ms": int((time.monotonic() - started) * 1000),
+            })
+
         try:
             parts: list[str] = []
             stats: dict = {}
-            async for chunk in self._ollama.chat(messages, model=model, options=options, stats=stats):
-                parts.append(chunk)
-                await self._send({
-                    "type": "progress",
-                    "task_id": task_id,
-                    "partial_output": chunk,
-                    "elapsed_ms": int((time.monotonic() - started) * 1000),
-                    "tokens_so_far": len(parts),
-                })
+            if self._ollama_sem.locked():
+                await _step("waiting for another answer to finish…")
+            async with self._ollama_sem:
+                await _step("contacting Ollama…")
+                # Until the first token arrives, prove liveness periodically —
+                # a cold model can take a minute or more to load, and this
+                # window used to render as an information-free "thinking…".
+                first_token = asyncio.Event()
+
+                async def _keepalive() -> None:
+                    waited = 0
+                    while not first_token.is_set():
+                        await asyncio.sleep(20)
+                        if first_token.is_set():
+                            return
+                        waited += 20
+                        await _step(
+                            f"still waiting for {model} to start answering ({waited}s) — "
+                            "loading a model for the first time can take a while"
+                        )
+
+                keepalive = asyncio.create_task(_keepalive())
+                try:
+                    async for chunk in self._ollama.chat(messages, model=model, options=options, stats=stats):
+                        first_token.set()
+                        parts.append(chunk)
+                        await self._send({
+                            "type": "progress",
+                            "task_id": task_id,
+                            "partial_output": chunk,
+                            "elapsed_ms": int((time.monotonic() - started) * 1000),
+                            "tokens_so_far": len(parts),
+                        })
+                finally:
+                    first_token.set()
+                    keepalive.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await keepalive
 
             duration_ms = int((time.monotonic() - started) * 1000)
             # Prefer Ollama's real counts (eval_count = generated tokens) over the
@@ -252,25 +383,41 @@ class AgentWSClient:
                 "result": result,
             })
             await self._cb.record_success()
-            if from_queue:
-                await self._queue.mark_complete(task_id)
 
         except asyncio.CancelledError:
-            # Checkpoint for retry on reconnect.
-            if not from_queue:
-                await self._queue.enqueue(task_id, task)
+            # Two cancel paths, neither sends a result: an orchestrator revoke
+            # (the contract forbids a result frame), or runtime shutdown (the
+            # orchestrator requeues the task itself on our disconnect).
+            was_revoked = task_id in self._revoked
+            self._revoked.discard(task_id)
+            logger.info(
+                "Task %s cancelled (%s) — no result sent",
+                task_id,
+                "revoked" if was_revoked else "shutdown",
+            )
             raise
 
-        except Exception as exc:
-            logger.error("Task %s failed: %s", task_id, exc)
-            await self._cb.record_failure()
-            if not from_queue:
-                await self._queue.enqueue(task_id, task)
+        except OllamaError as exc:
+            logger.error("Task %s failed: [%s] %s", task_id, exc.code, exc)
+            # A missing model is a configuration problem, not Ollama being
+            # down — it must not trip the breaker and block other models.
+            if exc.code != "model_not_found":
+                await self._cb.record_failure()
             await self._send({
                 "type": "result",
                 "task_id": task_id,
                 "status": "failed",
-                "error": {"code": "ollama_error", "message": str(exc)},
+                "error": {"code": exc.code, "message": str(exc)},
+            })
+
+        except Exception as exc:
+            logger.exception("Task %s failed unexpectedly", task_id)
+            await self._cb.record_failure()
+            await self._send({
+                "type": "result",
+                "task_id": task_id,
+                "status": "failed",
+                "error": {"code": "agent_error", "message": str(exc)},
             })
 
     # Gruper core model_preferences → Ollama option fields (see ollama_client.py
@@ -343,12 +490,12 @@ class AgentWSClient:
     async def _on_circuit_close(self) -> None:
         await self._send({"type": "status_update", "status": "idle"})
 
-    async def _checkpoint_in_flight(self) -> None:
+    async def _cancel_in_flight(self) -> None:
+        """Shutdown: cancel in-flight work and let the orchestrator requeue it
+        (it does so on our disconnect — see dispatcher.requeue_or_deadletter)."""
         if not self._in_flight:
             return
-        logger.info(
-            "Checkpointing %d in-flight task(s) to offline queue", len(self._in_flight)
-        )
+        logger.info("Cancelling %d in-flight task(s) for shutdown", len(self._in_flight))
         for task in list(self._in_flight.values()):
             task.cancel()
         await asyncio.gather(*self._in_flight.values(), return_exceptions=True)

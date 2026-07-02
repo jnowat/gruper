@@ -6,6 +6,36 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## Gruper Distributed — `gd-0.3.0` (2026-07-02) — Ollama Reliability: agents that actually reach the model
+
+Driven by the persistent Windows symptom "agents look ready and 'think', but Ollama never runs". Three interlocking agent-runtime defects explained it fully, and all three are fixed at the root.
+
+**The three root causes (agent runtime):**
+- FIXED: the circuit breaker could never close once it opened — it only reset on a successful Ollama call, but while open it never *attempted* one. Three transient failures (Ollama restarting, sleep/wake, a missing model) locked the agent into a permanent, silent no-Ollama state: still heartbeating, still "ready", swallowing every task forever. It now half-opens after a 20 s cooldown (one trial call; success closes it), and while open it FAILS TASKS FAST with a clear "Ollama has been failing — is it running?" error instead of silently queueing them
+- FIXED: failed tasks were checkpointed to the local `agent.db` queue *in addition to* being reported failed, and the queue re-executed its entire backlog on every reconnect — duplicating the orchestrator's own requeue (double execution), burning Ollama on stale tasks whose results were rejected, and resurrecting old work ("old tasks reappearing"). Local re-execution is retired entirely: the orchestrator's requeue-on-disconnect is the single retry path, and leftover queue entries from older builds are discarded at startup with a log line
+- FIXED: the queue drain ran *between* register and the first heartbeat — a drain longer than 90 s got the agent killed by the heartbeat watchdog mid-drain, requeueing everything and repeating the cycle (agents flapping online/offline while appearing to "think"). Heartbeats now start immediately after register, before anything else
+
+**Reaching Ollama, observably (agent runtime):**
+- ADDED: classified Ollama errors that travel end-to-end — `ollama_unreachable` (connect fails in 5 s, not a generic hang), `model_not_found` (names the model and the `ollama pull` fix), `ollama_timeout`, `ollama_error` — with structured logs around every request (start/finish/failure, model, URL, duration, chunks)
+- ADDED: startup Ollama preflight — two log lines say up front whether Ollama is reachable and whether the agent's configured model is still installed
+- ADDED: progress step notes before the first token ("contacting Ollama…", "still waiting for {model} to start answering (40s) — loading can take a while") so the pre-answer window is never an information-free "thinking…"; a degraded circuit is re-asserted after reconnect so the fleet dot stays honest
+- ADDED: Ollama calls are serialized (default concurrency 1, `OLLAMA_MAX_CONCURRENCY` to change) — concurrent model runs thrash RAM on desktop hardware; queued work shows "waiting for another answer to finish…"
+
+**Real abort (single-user slice of WP-08):**
+- ADDED: `POST /v1/tasks/{id}/revoke` implementing the endpoint + WS `revoke` frame already published in the contracts: the task settles instantly (error code `revoked`), the agent cancels its in-flight Ollama call, and per the contract sends no result. Round Table's **Stop** now genuinely stops the current speaker's inference; the answer view gets a **Stop** button for running answers; stopped questions display as neutral "stopped", not red "failed"
+- FIXED: `manager.send_json` now logs what failed and why (a frame-serialization bug hid inside its silent catch as a mystery disconnect)
+
+**Version skew across installs:**
+- ADDED: the console ships an expected engine version and checks `GET /v1/health` after connecting — if the adopted orchestrator is from an older install (the Tauri shell reuses ANY process on the port, so stale binaries can survive updates and silently lack every new fix), a banner says so and how to recover. `orchestrator_version`/`runtime_version` bumped to `gd-0.3.0` and now bumped in lockstep per release
+- ADDED: startup purge — soft-deleted agents whose task history is gone are hard-deleted, so the soft-delete debt self-drains
+
+**Round Table / console feedback:**
+- CHANGED: turn failures now name the new causes ("can't reach Ollama — is it still running?", the exact missing model, "was stopped"); live step notes show under a thinking turn; step frames are kept out of answer text
+
++5 orchestrator tests (66 total): revoke (pending, running + WS frame + late-result rejection, finished 409, non-owner 403) and the deleted-agent purge.
+
+---
+
 ## Gruper Distributed — `gd-0.2.x` (2026-07-02) — Lifecycle Reliability: no more ghost agents, zombie tasks, or silent failures
 
 Driven by a real Windows testing session whose debug log told one story: agents that looked "ready" but were long dead. Agent statuses live in `orchestrator.db`, which outlives every console install and orchestrator restart — and nothing ever reset them. The heartbeat watchdog only inspects connections it knows about, so a stale `idle` row was invisible to every cleanup path. Everything else cascaded from that lie: Round Table seated dead agents (turns queued forever, Ollama never engaged, "couldn't respond this time"), removal was refused ("it can be removed once it goes offline" — which never happened), and tasks piled up as unclearable "queued" zombies.

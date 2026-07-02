@@ -1,11 +1,13 @@
 """
-SQLite-backed FIFO queue for tasks that cannot be executed immediately.
+SQLite-backed local task queue — RETIRED as an execution path.
 
-Tasks are enqueued when:
-  - The circuit breaker is open (Ollama unavailable).
-  - The orchestrator connection drops mid-execution.
-
-They are drained in FIFO order on the next successful reconnect.
+Older runtimes checkpointed tasks here (circuit open, connection dropped) and
+re-executed the backlog on every reconnect. That duplicated the orchestrator's
+own requeue-on-disconnect (double execution), burned Ollama on stale tasks
+whose results were rejected, and the drain could starve heartbeats long enough
+to get the agent killed mid-drain. The orchestrator is now the single source
+of truth for retries; this module survives only so that startup can detect and
+discard entries left behind by older builds (see AgentWSClient.start()).
 """
 
 import json
@@ -64,6 +66,11 @@ class OfflineQueue:
         await self._db.execute(
             "DELETE FROM queued_tasks WHERE task_id = ?", (task_id,)
         )
+        await self._db.commit()
+
+    async def clear(self) -> None:
+        """Discard every queued entry (stale checkpoints from older builds)."""
+        await self._db.execute("DELETE FROM queued_tasks")
         await self._db.commit()
 
     async def size(self) -> int:

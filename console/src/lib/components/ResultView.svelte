@@ -22,7 +22,7 @@
   import { authStore } from '$lib/stores/auth.js';
   import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
-  import { taskStatusColour, taskStatusLabel, RUNNING_TASK_STATUSES } from '$lib/taskDisplay.js';
+  import { taskDisplayStatus, RUNNING_TASK_STATUSES } from '$lib/taskDisplay.js';
   import { roleLabel } from '$lib/roles.js';
   import AgentAvatar from '$lib/components/AgentAvatar.svelte';
   import type { Task } from '$lib/types.js';
@@ -60,6 +60,16 @@
   const isRunning = $derived(task ? RUNNING_TASK_STATUSES.has(task.status) : false);
   // The reply as it streams in, one growing block.
   const streamedText = $derived(progressLines.map((l) => l.text).join(''));
+  // The agent's latest status note ("contacting Ollama…", "still waiting for
+  // the model…") — shown while there's no answer text yet, so the waiting
+  // window is never an information-free "thinking…".
+  const latestStep = $derived.by(() => {
+    for (let i = progressLines.length - 1; i >= 0; i--) {
+      if (progressLines[i].step) return progressLines[i].step;
+    }
+    return null;
+  });
+  const wasStopped = $derived(task?.status === 'failed' && task?.error?.code === 'revoked');
 
   // Metrics prefer the fetched full result, then the task_complete event.
   const mModel = $derived(resultModel ?? task?.result?.model_used ?? null);
@@ -156,6 +166,33 @@
       fetchError = err instanceof Error ? err.message : String(err);
     } finally {
       cancelling = false;
+    }
+  }
+
+  /** Stop a dispatched/running answer: the orchestrator settles the task and
+      tells the agent to abort its Ollama call. */
+  let stopping = $state(false);
+  async function stopTask(): Promise<void> {
+    if (!task || stopping) return;
+    const { token, orchestratorUrl } = $authStore;
+    if (!token) return;
+    stopping = true;
+    try {
+      const updated = await new OrchestratorClient(orchestratorUrl, token).revokeTask(task.id);
+      tasksStore.applyComplete({
+        type: 'task_complete',
+        payload: {
+          task_id: updated.id,
+          agent_id: updated.assigned_agent_id,
+          final_status: 'failed',
+          error_code: 'revoked',
+        },
+      });
+      logStore.frontend('info', 'ui', 'stopped running task', { task_id: task.id });
+    } catch (err) {
+      fetchError = err instanceof Error ? err.message : String(err);
+    } finally {
+      stopping = false;
     }
   }
 
@@ -277,8 +314,8 @@
             {/if}
             <span>·</span>
           {/if}
-          <span class="{taskStatusColour(task.status)} {isRunning ? 'progress-pulse' : ''}">
-            {taskStatusLabel(task.status)}
+          <span class="{taskDisplayStatus(task).colour} {isRunning ? 'progress-pulse' : ''}">
+            {taskDisplayStatus(task).label}
           </span>
         </div>
       </div>
@@ -347,7 +384,11 @@
         <div class="flex items-center gap-3 py-2">
           <div class="flex items-center gap-2 text-sm text-amber-400 progress-pulse">
             <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-            {task.status === 'running' ? 'thinking…' : `waiting for ${agentName ?? 'an agent'}…`}
+            {#if task.status === 'pending'}
+              waiting for {agentName ?? 'an agent'}…
+            {:else}
+              {latestStep ?? 'thinking…'}
+            {/if}
           </div>
           {#if task.status === 'pending'}
             <button
@@ -358,6 +399,15 @@
             >
               {cancelling ? 'Cancelling…' : 'Cancel'}
             </button>
+          {:else}
+            <button
+              onclick={stopTask}
+              disabled={stopping}
+              class="text-xs text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
+              title="Stop this answer — the agent abandons it"
+            >
+              {stopping ? 'Stopping…' : 'Stop'}
+            </button>
           {/if}
         </div>
         {#if fetchError}
@@ -366,11 +416,21 @@
       {/if}
 
     {:else}
-      <!-- Failed / timed out / unreachable: a plain sentence and a way forward. -->
-      <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-3 space-y-2">
-        {#if task.status === 'failed'}
+      <!-- Failed / stopped / timed out: a plain sentence and a way forward. -->
+      <div class="rounded-lg p-3 space-y-2 {wasStopped ? 'bg-white/5 border border-white/10' : 'bg-red-500/10 border border-red-500/30'}">
+        {#if wasStopped}
+          <p class="text-sm text-slate-300">You stopped this answer.</p>
+        {:else if task.status === 'failed'}
           <p class="text-sm text-red-300">
-            {agentName ?? 'The agent'} couldn't finish this answer.
+            {#if task.error?.code === 'ollama_unreachable'}
+              {agentName ?? 'The agent'} couldn't reach Ollama.
+            {:else if task.error?.code === 'model_not_found'}
+              {agentName ?? 'The agent'}'s model isn't installed in Ollama any more.
+            {:else if task.error?.code === 'ollama_timeout'}
+              {agentName ?? 'The agent'}'s model took too long to respond.
+            {:else}
+              {agentName ?? 'The agent'} couldn't finish this answer.
+            {/if}
           </p>
           {#if task.error?.message}<p class="text-xs text-red-400/80">{task.error.message}</p>{/if}
         {:else if task.status === 'timed_out'}

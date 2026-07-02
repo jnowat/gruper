@@ -327,6 +327,106 @@ async def delete_tasks(
     return {"deleted": len(rows)}
 
 
+class TaskRevokeRequest(BaseModel):
+    reason: str | None = Field(None, max_length=256)
+
+
+# Statuses a revoke can act on; everything else is already settled.
+_REVOCABLE_STATUSES = ("pending", "dispatched", "running")
+
+
+@router.post(
+    "/{task_id}/revoke",
+    response_model=TaskResponse,
+    summary="Stop a task (abort in-flight work)",
+)
+async def revoke_task(
+    task_id: str,
+    request: Request,
+    body: TaskRevokeRequest | None = None,
+    user_id: str = Depends(get_current_user_id),
+) -> TaskResponse:
+    """Stop a task, including one an agent is actively working on.
+
+    The task is settled immediately (failed, error code `revoked`) so the UI
+    never waits on a stopping task, then a best-effort `revoke` frame goes to
+    the agent, which aborts its Ollama call. Per the WS contract the agent
+    sends no result for a revoked task — and the result handler ignores late
+    frames for non-running tasks anyway. This is the single-user slice of
+    WP-08's abort channel, matching the shape already published in
+    openapi.yaml and wss-messages.schema.json.
+    """
+    pool: Database = request.app.state.pool
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="task_id must be a valid UUID",
+        )
+    row = await pool.fetchrow(
+        "SELECT submitter_id::text, assigned_agent_id::text, status FROM tasks WHERE id = $1::uuid",
+        task_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if row["submitter_id"] != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your task")
+    if row["status"] not in _REVOCABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task already finished",
+        )
+
+    reason = (body.reason if body else None) or "Stopped by you"
+    updated = await pool.fetchrow(
+        f"""
+        UPDATE tasks
+        SET status = 'failed', completed_at = $2, error = $3::jsonb
+        WHERE id = $1::uuid
+          AND status IN ({", ".join(f"${i + 4}" for i in range(len(_REVOCABLE_STATUSES)))})
+        RETURNING {_TASK_SELECT}
+        """,
+        task_id,
+        now_iso(),
+        {"code": "revoked", "message": reason},
+        *_REVOCABLE_STATUSES,
+    )
+    if updated is None:
+        # Finished between the check and the update — treat as already settled.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task already finished")
+
+    # Best-effort abort on the agent (no-op if it's not connected). NB:
+    # now_iso() returns a datetime for DB binding — a JSON frame needs the
+    # string form, or send_json dies on serialization.
+    await manager.send_json(row["assigned_agent_id"], {
+        "type": "revoke",
+        "id": new_id(),
+        "ts": now_iso().isoformat(),
+        "payload": {"task_id": task_id, "reason": "submitter_request"},
+    })
+
+    await append_event(
+        pool,
+        actor_id=user_id,
+        action="task.revoked",
+        subject_id=task_id,
+        metadata={"reason": reason},
+    )
+    await manager.broadcast_to_user(user_id, {
+        "type": "task_complete",
+        "payload": {
+            "task_id": task_id,
+            "agent_id": row["assigned_agent_id"],
+            "final_status": "failed",
+            "duration_ms": None,
+            "model_used": None,
+            "error_code": "revoked",
+            "output_preview": None,
+        },
+    })
+    logger.info("Task %s revoked (user=%s)", task_id, user_id)
+    return _row_to_response(updated)
+
+
 @router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,

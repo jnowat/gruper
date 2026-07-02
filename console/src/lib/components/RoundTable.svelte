@@ -142,7 +142,7 @@
             {#if turn.status === 'thinking'}
               <div class="flex items-center gap-2 text-sm text-amber-400 progress-pulse">
                 <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-                thinking…
+                {turn.note ?? 'thinking…'}
               </div>
             {:else if turn.status === 'failed'}
               <p class="text-sm text-slate-500 italic">{turn.text}</p>

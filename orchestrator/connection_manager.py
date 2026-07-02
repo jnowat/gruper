@@ -59,8 +59,13 @@ class ConnectionManager:
             return
         try:
             await conn.websocket.send_json(data)
-        except Exception:
-            logger.warning("Failed to send message to agent %s — disconnecting", agent_id)
+        except Exception as exc:
+            # Log WHAT failed, not just that it failed — a serialization bug
+            # in a frame once hid here as a mysterious "agent disconnected".
+            logger.warning(
+                "Failed to send %r message to agent %s (%s: %s) — disconnecting",
+                data.get("type"), agent_id, type(exc).__name__, exc,
+            )
             self.disconnect(agent_id)
 
     async def close_agent_ws(self, agent_id: str, reason: str) -> None:

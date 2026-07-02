@@ -40,6 +40,21 @@ export function taskStatusColour(status: string): string {
   return TASK_STATUS_COLOUR[status as TaskStatus] ?? 'text-slate-400';
 }
 
+/**
+ * Status display for one task, error-aware: a question the user stopped is
+ * technically `failed` (error code `revoked`), but showing it as a red
+ * "failed" would tell the user something broke when they asked for it.
+ */
+export function taskDisplayStatus(task: { status: string; error?: { code?: string } | null }): {
+  label: string;
+  colour: string;
+} {
+  if (task.status === 'failed' && task.error?.code === 'revoked') {
+    return { label: 'stopped', colour: 'text-slate-400' };
+  }
+  return { label: taskStatusLabel(task.status), colour: taskStatusColour(task.status) };
+}
+
 // Agent statuses: "idle" reads as negative to a normal person but means
 // "ready to work"; "degraded"/"draining" are ops jargon.
 export const AGENT_STATUS_LABEL: Record<AgentStatus, string> = {

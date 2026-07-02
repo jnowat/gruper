@@ -30,9 +30,11 @@ function createTasksStore() {
 
     applyProgress(event: TaskProgressEvent) {
       store.update((s) => {
+        // step is a status note ("contacting Ollama…"), NOT output — it must
+        // never be folded into the answer text the UI concatenates.
         const line: ProgressLine = {
           ts: event.payload.elapsed_ms,
-          text: event.payload.partial_output ?? event.payload.step ?? '',
+          text: event.payload.partial_output ?? '',
           step: event.payload.step,
           tokens: event.payload.tokens_so_far,
         };

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # How often to send heartbeat frames (orchestrator times out after 90 s)
     heartbeat_interval_s: int = 30
 
+    # How many Ollama requests may run at once. Default 1: concurrent model
+    # runs thrash RAM on typical desktop hardware and make every answer
+    # slower; queued tasks show a "waiting for another answer…" step instead.
+    ollama_max_concurrency: int = 1
+
     # Capability descriptor sent to the orchestrator on registration
     capabilities: str = (
         '{"models":[],"roles":[],"tools":[],'
@@ -38,8 +43,10 @@ class Settings(BaseSettings):
 
     log_level: str = "INFO"
 
-    # Frozen at build time; must match the ^gd-\d+\.\d+\.\d+ pattern
-    runtime_version: str = "gd-0.1.0"
+    # Frozen at build time; must match the ^gd-\d+\.\d+\.\d+ pattern.
+    # gd-0.3.0: Ollama-reliability runtime (half-open circuit breaker,
+    # classified errors, revoke support, no local queue re-execution).
+    runtime_version: str = "gd-0.3.0"
 
     def capabilities_dict(self) -> dict:
         return json.loads(self.capabilities)
