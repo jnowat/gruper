@@ -14,7 +14,7 @@ task stays 'pending' and is dispatched on the agent's next WebSocket connect.
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from ..connection_manager import manager
@@ -133,7 +133,7 @@ async def submit_task(
             detail="assigned_agent_id must be a valid UUID",
         )
     agent = await pool.fetchrow(
-        "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid",
+        "SELECT id::text, owner_id::text FROM agents WHERE id = $1::uuid AND deleted_at IS NULL",
         body.assigned_agent_id,
     )
     if agent is None:
@@ -262,6 +262,123 @@ async def get_task(
     if row["submitter_id"] != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your task")
     return _row_to_response(row)
+
+
+# A task can be deleted while it is waiting or after it has finished. A
+# dispatched/running task is refused: the agent is actively burning Ollama on
+# it, and there is no abort channel until WP-08 — deleting the row would only
+# orphan the eventual result, not stop the work.
+_DELETABLE_STATUSES = ("pending", "complete", "failed", "timed_out", "dead_letter")
+
+# Bulk-delete scopes for DELETE /v1/tasks?scope=…
+_BULK_SCOPES: dict[str, tuple[str, ...]] = {
+    # Everything that went wrong.
+    "failed": ("failed", "timed_out", "dead_letter"),
+    # Everything not actively being worked on — the History "Clear all".
+    "all": _DELETABLE_STATUSES,
+}
+
+
+@router.delete(
+    "",
+    summary="Bulk-delete the caller's tasks by scope",
+)
+async def delete_tasks(
+    request: Request,
+    scope: str = "failed",
+    user_id: str = Depends(get_current_user_id),
+) -> dict[str, int]:
+    """Really delete tasks, server-side.
+
+    Before this existed, the console's "Clear" buttons only pruned the
+    session's in-memory list — every task ever submitted came back on the
+    next launch (orchestrator.db outlives console installs by design), which
+    real Windows testing flagged as "old tasks reappear in every new build".
+
+    scope=failed  → failed / timed_out / dead_letter
+    scope=all     → those plus complete and pending (still-running work stays)
+    """
+    statuses = _BULK_SCOPES.get(scope)
+    if statuses is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"scope must be one of: {sorted(_BULK_SCOPES)}",
+        )
+    pool: Database = request.app.state.pool
+    placeholders = ", ".join(f"${i + 2}" for i in range(len(statuses)))
+    rows = await pool.fetch(
+        f"""
+        DELETE FROM tasks
+        WHERE submitter_id = $1::uuid AND status IN ({placeholders})
+        RETURNING id::text
+        """,
+        user_id,
+        *statuses,
+    )
+    if rows:
+        await append_event(
+            pool,
+            actor_id=user_id,
+            action="task.deleted",
+            subject_id=user_id,
+            metadata={"scope": scope, "count": len(rows)},
+        )
+        logger.info("Deleted %d task(s) for user %s (scope=%s)", len(rows), user_id, scope)
+    return {"deleted": len(rows)}
+
+
+@router.delete(
+    "/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete (or cancel) a single task",
+)
+async def delete_task(
+    task_id: str,
+    request: Request,
+    user_id: str = Depends(get_current_user_id),
+) -> Response:
+    """Delete one task. For a pending task this doubles as "cancel": it was
+    never dispatched anywhere, so removing the row is a complete cancellation
+    — the affordance a question queued to an agent that never comes back
+    previously lacked entirely."""
+    pool: Database = request.app.state.pool
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="task_id must be a valid UUID",
+        )
+    row = await pool.fetchrow(
+        "SELECT submitter_id::text, status FROM tasks WHERE id = $1::uuid",
+        task_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if row["submitter_id"] != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your task")
+    if row["status"] not in _DELETABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task is being worked on right now and can't be deleted yet",
+        )
+    # Guard on status so a task that got dispatched between the check above
+    # and this DELETE survives (no lost in-flight work).
+    deleted = await pool.fetchval(
+        f"""
+        DELETE FROM tasks
+        WHERE id = $1::uuid AND status IN ({", ".join(f"${i + 2}" for i in range(len(_DELETABLE_STATUSES)))})
+        RETURNING id::text
+        """,
+        task_id,
+        *_DELETABLE_STATUSES,
+    )
+    if deleted is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Task is being worked on right now and can't be deleted yet",
+        )
+    await append_event(pool, actor_id=user_id, action="task.deleted", subject_id=task_id)
+    logger.info("Task %s deleted (user=%s)", task_id, user_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

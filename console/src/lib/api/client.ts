@@ -39,6 +39,7 @@ export class OrchestratorClient {
       }
       throw new Error(message || res.statusText || `Request failed (${res.status})`);
     }
+    if (res.status === 204) return undefined as T;
     return res.json() as Promise<T>;
   }
 
@@ -69,8 +70,30 @@ export class OrchestratorClient {
     });
   }
 
+  /**
+   * Remove an agent for real (server-side soft delete): it vanishes from
+   * every listing, its queued/in-flight work is failed, a live connection is
+   * kicked, and its runtime process exits when its re-register is rejected.
+   */
+  deleteAgent(id: string): Promise<void> {
+    return this._fetch<void>(`/v1/agents/${id}`, { method: 'DELETE' });
+  }
+
   listTasks(): Promise<Task[]> {
     return this._fetch<Task[]>('/v1/tasks');
+  }
+
+  /** Delete one task; for a pending task this is a full cancel. */
+  deleteTask(id: string): Promise<void> {
+    return this._fetch<void>(`/v1/tasks/${id}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Bulk-delete tasks server-side. 'failed' = failed/timed-out/unreachable;
+   * 'all' = everything not actively being worked on.
+   */
+  deleteTasks(scope: 'failed' | 'all'): Promise<{ deleted: number }> {
+    return this._fetch<{ deleted: number }>(`/v1/tasks?scope=${scope}`, { method: 'DELETE' });
   }
 
   getTask(id: string): Promise<Task> {

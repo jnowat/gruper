@@ -33,12 +33,14 @@
     agentName = null,
     agentRoleId = null,
     onResubmitted,
+    onCancelled,
   }: {
     taskId: string | null;
     agentId?: string | null;
     agentName?: string | null;
     agentRoleId?: string | null;
     onResubmitted?: (taskId: string) => void;
+    onCancelled?: () => void;
   } = $props();
 
   let task = $state<Task | null>(null);
@@ -132,6 +134,30 @@
       fetchResult(task.id);
     }
   });
+
+  /**
+   * Cancel a queued question. Only offered while the task is still 'pending'
+   * — it hasn't been handed to an agent yet, so deleting it is a complete,
+   * safe cancellation (the escape hatch for a question waiting on an agent
+   * that never comes back).
+   */
+  let cancelling = $state(false);
+  async function cancelTask(): Promise<void> {
+    if (!task || cancelling) return;
+    const { token, orchestratorUrl } = $authStore;
+    if (!token) return;
+    cancelling = true;
+    try {
+      await new OrchestratorClient(orchestratorUrl, token).deleteTask(task.id);
+      tasksStore.removeTask(task.id);
+      logStore.frontend('info', 'ui', 'cancelled queued task', { task_id: task.id });
+      onCancelled?.();
+    } catch (err) {
+      fetchError = err instanceof Error ? err.message : String(err);
+    } finally {
+      cancelling = false;
+    }
+  }
 
   /** Resubmit the same question to the same agent (for failed/timed-out tasks). */
   async function tryAgain(): Promise<void> {
@@ -318,10 +344,25 @@
       {#if streamedText}
         <div bind:this={streamEl} class="message-bubble max-h-[60vh] overflow-y-auto text-sm text-slate-200" style="white-space: pre-wrap; word-break: break-word;">{streamedText}<span class="text-amber-400 progress-pulse">▌</span></div>
       {:else}
-        <div class="flex items-center gap-2 text-sm text-amber-400 progress-pulse py-2">
-          <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
-          {task.status === 'running' ? 'thinking…' : `waiting for ${agentName ?? 'an agent'}…`}
+        <div class="flex items-center gap-3 py-2">
+          <div class="flex items-center gap-2 text-sm text-amber-400 progress-pulse">
+            <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span>
+            {task.status === 'running' ? 'thinking…' : `waiting for ${agentName ?? 'an agent'}…`}
+          </div>
+          {#if task.status === 'pending'}
+            <button
+              onclick={cancelTask}
+              disabled={cancelling}
+              class="text-xs text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
+              title="This question hasn't started yet — cancelling removes it completely"
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </button>
+          {/if}
         </div>
+        {#if fetchError}
+          <p class="text-xs text-red-400">{fetchError}</p>
+        {/if}
       {/if}
 
     {:else}

@@ -259,6 +259,31 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+    delete:
+      operationId: deleteAgent
+      summary: Remove an agent (owner only, soft delete)
+      description: |
+        Soft-deletes the agent: the row survives (`deleted_at` set) so task
+        history and the audit trail stay coherent, but the agent disappears
+        from every listing, cannot be assigned new tasks, and cannot
+        re-register over the WebSocket. A live connection is closed
+        server-side; outstanding (`pending`/`dispatched`/`running`) tasks are
+        failed with error code `agent_removed`. A still-running runtime exits
+        on its own once its re-register is rejected. A non-owner (or an
+        already-deleted id) gets an indistinguishable 404.
+      tags: [agents]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "204":
+          description: Agent removed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /agents/ws:
     get:
       operationId: agentWebSocket
@@ -315,6 +340,42 @@ paths:
   # ── Tasks ─────────────────────────────────────────────────────────────────
 
   /tasks:
+    delete:
+      operationId: deleteTasks
+      summary: Bulk-delete the caller's tasks by scope
+      description: |
+        Really deletes task rows, server-side (the desktop History "Clear"
+        buttons). `scope=failed` removes failed / timed_out / dead_letter
+        tasks; `scope=all` additionally removes complete and pending ones.
+        Tasks being actively worked on (dispatched/running) are never touched.
+      tags: [tasks]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [failed, all]
+            default: failed
+      responses:
+        "200":
+          description: Number of tasks deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: integer
+                    minimum: 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
     get:
       operationId: listTasks
       summary: List tasks
@@ -431,6 +492,36 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+    delete:
+      operationId: deleteTask
+      summary: Delete (or cancel) a single task
+      description: |
+        Deletes one task the caller submitted. For a `pending` task this is a
+        full cancellation — it was never dispatched, so removing the row stops
+        it completely. A `dispatched`/`running` task is refused with 409: the
+        agent is actively working on it and there is no abort channel until
+        WP-08's `task_abort`.
+      tags: [tasks]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "204":
+          description: Task deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Task is dispatched/running and cannot be deleted yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /tasks/{task_id}/revoke:
     post:

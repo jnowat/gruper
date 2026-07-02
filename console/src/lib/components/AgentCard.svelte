@@ -181,6 +181,18 @@
         <span class="text-xs flex-shrink-0 status-{agent.status}">{statusLabel}</span>
       </button>
 
+      {#if onRename && /^local agent$/i.test(agent.name.trim())}
+        <!-- A leftover generic name from an early build — the one thing that
+             makes a fleet unscannable. Nudge exactly here, where fixing it
+             is one click away. -->
+        <button
+          onclick={startEdit}
+          class="w-full text-left text-xs mt-0.5 text-amber-400/80 hover:text-amber-300 transition-colors"
+        >
+          ✎ Give this agent a real name
+        </button>
+      {/if}
+
       {#if confirmingRemove}
         <div class="mt-1.5 flex items-center gap-2 text-xs bg-white/5 rounded px-2 py-1">
           <span class="text-slate-400 flex-1 truncate">

@@ -12,7 +12,7 @@ from .database import close_db, get_pool, init_db, run_migrations
 from .db.util import now_iso
 from .routers import agents, auth, health, tasks
 from .structured_log import configure_logging
-from .ws.agent_ws import handle_agent_ws
+from .ws.agent_ws import broadcast_fleet_event, handle_agent_ws
 from .ws.console_ws import handle_console_ws
 
 # Structured, category-tagged logging: emits one JSON line per record on stdout,
@@ -34,24 +34,42 @@ _TIMEOUT_WATCHDOG_SQL_PG = """
     UPDATE tasks SET status = 'timed_out', completed_at = $1
     WHERE status IN ('dispatched', 'running')
       AND dispatched_at + (timeout_s * INTERVAL '1 second') < $1
-    RETURNING id::text, assigned_agent_id::text
+    RETURNING id::text, assigned_agent_id::text, submitter_id::text
 """
 _TIMEOUT_WATCHDOG_SQL_SQLITE = """
     UPDATE tasks SET status = 'timed_out', completed_at = ?1
     WHERE status IN ('dispatched', 'running')
       AND datetime(dispatched_at, '+' || timeout_s || ' seconds') < datetime(?1)
-    RETURNING id, assigned_agent_id
+    RETURNING id, assigned_agent_id, submitter_id
 """
 
 
 async def _timeout_watchdog() -> None:
-    """Background task: mark dispatched/running tasks timed_out when their deadline expires."""
+    """Background task: mark dispatched/running tasks timed_out when their deadline expires.
+
+    Each transition is also broadcast to the submitter's consoles as a
+    task_complete frame — without it, a console sitting on an open answer
+    view keeps showing "answering…" for a task the orchestrator has already
+    given up on, until the user happens to trigger a full REST reload.
+    """
     while True:
         await asyncio.sleep(30)
         db = get_pool()
         rows = await db.fetch(db.q(pg=_TIMEOUT_WATCHDOG_SQL_PG, lite=_TIMEOUT_WATCHDOG_SQL_SQLITE), now_iso())
         for row in rows:
             logger.warning("Task %s timed out (agent=%s)", row["id"], row["assigned_agent_id"])
+            await manager.broadcast_to_user(row["submitter_id"], {
+                "type": "task_complete",
+                "payload": {
+                    "task_id": row["id"],
+                    "agent_id": row["assigned_agent_id"],
+                    "final_status": "timed_out",
+                    "duration_ms": None,
+                    "model_used": None,
+                    "error_code": "timeout",
+                    "output_preview": None,
+                },
+            })
 
 
 async def _heartbeat_watchdog() -> None:
@@ -59,7 +77,11 @@ async def _heartbeat_watchdog() -> None:
 
     Runs every heartbeat_check_interval_s seconds. Any agent whose last
     heartbeat is older than heartbeat_timeout_s is disconnected from the
-    connection manager and marked offline in the database.
+    connection manager, marked offline in the database, AND broadcast to the
+    owner's consoles as a fleet_event. The broadcast matters: without it a
+    silently-dead agent kept its green "ready" dot in every open console
+    until the next full reconnect, which is exactly the ghost-fleet state
+    observed in real Windows testing.
     """
     while True:
         await asyncio.sleep(settings.heartbeat_check_interval_s)
@@ -69,16 +91,44 @@ async def _heartbeat_watchdog() -> None:
         pool = get_pool()
         for agent_id in stale:
             manager.disconnect(agent_id)
-            await pool.execute(
-                "UPDATE agents SET status = 'offline' WHERE id = $1::uuid", agent_id
+            row = await pool.fetchrow(
+                "UPDATE agents SET status = 'offline' WHERE id = $1::uuid RETURNING owner_id::text",
+                agent_id,
             )
             logger.warning("Agent %s marked offline — missed heartbeat", agent_id)
+            if row:
+                await broadcast_fleet_event(pool, agent_id, row["owner_id"], "agent_offline", "offline")
+
+
+async def sweep_stale_agent_statuses(pool) -> int:
+    """Mark every non-offline agent offline. Runs once at startup.
+
+    Agent liveness is a property of a WebSocket connection to THIS process;
+    no connection can survive an orchestrator restart, so any 'idle'/'busy'
+    row at boot is a leftover from a previous run (common on Windows, where
+    the sidecar is routinely killed rather than shut down). Without this
+    sweep those rows read as "ready" forever: the heartbeat watchdog only
+    inspects connections it knows about, so a stale row is invisible to
+    every other cleanup path. This single lie was upstream of most of the
+    ghost-fleet symptoms (Round Table seating dead agents, tasks queuing
+    forever, un-removable agents).
+    """
+    rows = await pool.fetch(
+        "UPDATE agents SET status = 'offline' WHERE status != 'offline' RETURNING id::text"
+    )
+    if rows:
+        logger.info(
+            "Startup sweep: marked %d agent(s) offline (statuses left over from a previous run)",
+            len(rows),
+        )
+    return len(rows)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     pool = await init_db(settings.database_url)
     await run_migrations(pool)
+    await sweep_stale_agent_statuses(pool)
     app.state.pool = pool
 
     watchdog = asyncio.create_task(_heartbeat_watchdog())

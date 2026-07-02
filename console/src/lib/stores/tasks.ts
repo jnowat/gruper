@@ -92,10 +92,10 @@ function createTasksStore() {
     },
 
     /**
-     * Client-side only — there is no backend DELETE endpoint for tasks, so
-     * "clearing" here just drops them from this session's view. A fresh
-     * REST reload or WS reconnect would bring persisted tasks back; this is
-     * for tidying up a long-running session's list, not real deletion.
+     * Local mirrors of the server-side bulk deletes (DELETE /v1/tasks?scope=…)
+     * — the caller deletes on the orchestrator first, then prunes here so the
+     * list updates without a full reload. Actively-worked tasks stay: the
+     * server refuses to delete them and so do we.
      */
     clearFailed() {
       store.update((s) => ({
@@ -104,8 +104,20 @@ function createTasksStore() {
       }));
     },
 
-    clearAll() {
-      store.update((s) => ({ ...s, tasks: [] }));
+    clearFinished() {
+      store.update((s) => ({
+        ...s,
+        tasks: s.tasks.filter((t) => t.status === 'dispatched' || t.status === 'running'),
+      }));
+    },
+
+    /** Drop one task (after a successful single delete/cancel). */
+    removeTask(taskId: string) {
+      store.update((s) => {
+        const progress = { ...s.progress };
+        delete progress[taskId];
+        return { tasks: s.tasks.filter((t) => t.id !== taskId), progress };
+      });
     },
   };
 }

@@ -15,6 +15,7 @@
 
 import { get, writable } from 'svelte/store';
 import { authStore } from '$lib/stores/auth.js';
+import { fleetStore } from '$lib/stores/fleet.js';
 import { tasksStore } from '$lib/stores/tasks.js';
 import { logStore } from '$lib/stores/logs.js';
 import { OrchestratorClient } from '$lib/api/client.js';
@@ -50,7 +51,17 @@ const TERMINAL = ['complete', 'failed', 'timed_out', 'dead_letter'];
 // model never has its still-running answer abandoned by the UI.
 const TURN_TIMEOUT_S = 300;
 const TURN_DEADLINE_MS = (TURN_TIMEOUT_S + 60) * 1000;
-const POLL_MS = 800;
+// A turn that is still 'pending' after this long was never picked up at all
+// (dispatch is synchronous when the agent is connected) — the agent looked
+// online but isn't taking work. Fail the turn fast and move on instead of
+// stalling the whole table for minutes; the abandoned task is cancelled so it
+// doesn't linger as a zombie either.
+const PENDING_GRACE_MS = 12_000;
+// Poll briskly at first (fail-fast needs it), then back off — a fixed 800 ms
+// forever floods the debug log with GET /v1/tasks lines during long answers.
+const POLL_FAST_MS = 800;
+const POLL_SLOW_MS = 2_500;
+const POLL_SLOWDOWN_AFTER_MS = 15_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,6 +86,22 @@ function createRoundTableStore() {
       transcript[idx] = { ...transcript[idx], ...patch };
       return { ...s, transcript };
     });
+  }
+
+  /** A failed turn says WHY — "couldn't respond" hid three very different
+      problems (never dispatched / model error / too slow) behind one string. */
+  function turnFailureText(
+    name: string,
+    status: string,
+    error: { code?: string; message?: string } | null,
+  ): string {
+    if (status === 'timed_out') return `${name} ran out of time before finishing.`;
+    if (status === 'dead_letter') return `${name} kept losing its connection, so its turn was skipped.`;
+    if (error?.code === 'ollama_error') {
+      return `${name} couldn't reach its model (Ollama) — is Ollama still running?`;
+    }
+    if (error?.code === 'agent_removed') return `${name} was removed mid-discussion.`;
+    return `${name} hit a problem${error?.message ? `: ${error.message}` : ' and couldn’t respond.'}`;
   }
 
   function buildSystemPrompt(a: Agent): string {
@@ -116,7 +143,8 @@ function createRoundTableStore() {
       });
       const taskId = task.id;
       try {
-        const deadline = Date.now() + TURN_DEADLINE_MS;
+        const started = Date.now();
+        const deadline = started + TURN_DEADLINE_MS;
         while (Date.now() < deadline) {
           if (stopRequested) {
             const partial = get(store).transcript[idx].text;
@@ -143,20 +171,37 @@ function createRoundTableStore() {
                 status: 'done',
               });
             } else {
-              logStore.frontend('warn', 'ui', `round table turn ${t.status}`, {
+              logStore.frontend('warn', 'ui', `round table turn ${t.status}: ${t.error?.message ?? ''}`, {
                 task_id: taskId,
                 agent_id: a.id,
               });
-              patchTurn(idx, { text: `${a.name} couldn't respond this time.`, status: 'failed' });
+              patchTurn(idx, { text: turnFailureText(a.name, t.status, t.error), status: 'failed' });
             }
             return;
           }
-          await sleep(POLL_MS);
+          // Fail fast on a turn that was never even picked up.
+          if (t.status === 'pending' && Date.now() - started > PENDING_GRACE_MS) {
+            logStore.frontend('warn', 'ui', 'round table turn never dispatched — cancelling', {
+              task_id: taskId,
+              agent_id: a.id,
+            });
+            try {
+              await client.deleteTask(taskId);
+            } catch {
+              // best-effort cleanup; the turn fails either way
+            }
+            patchTurn(idx, {
+              text: `${a.name} isn't picking up work — it may have stopped running. Check its dot in the sidebar.`,
+              status: 'failed',
+            });
+            return;
+          }
+          await sleep(Date.now() - started > POLL_SLOWDOWN_AFTER_MS ? POLL_SLOW_MS : POLL_FAST_MS);
         }
         logStore.frontend('warn', 'ui', 'round table turn timed out waiting for a response', {
           agent_id: a.id,
         });
-        patchTurn(idx, { text: `${a.name} couldn't respond this time.`, status: 'failed' });
+        patchTurn(idx, { text: `${a.name} ran out of time before finishing.`, status: 'failed' });
       } finally {
         // The streamed chunks live in tasksStore.progress; once the turn is
         // settled the transcript holds the text, so free the buffer — a long
@@ -178,18 +223,37 @@ function createRoundTableStore() {
    * turn would stall the round for minutes and answer into the void).
    */
   async function runAgents(agents: Agent[]): Promise<void> {
-    const s = get(store);
-    const participants = agents.filter((a) => s.participants.has(a.id) && a.status !== 'offline');
-    if (participants.length === 0) return;
-
     const auth = get(authStore);
     if (!auth.token) {
       store.update((st) => ({ ...st, error: 'Not connected.' }));
       return;
     }
+    const client = new OrchestratorClient(auth.orchestratorUrl, auth.token);
+
+    // Pre-flight: re-fetch the fleet over REST before seating anyone. The
+    // authoritative statuses catch agents that look "ready" from a stale
+    // snapshot but are actually gone — the exact state that used to send a
+    // whole round of turns into the void.
+    let roster = agents;
+    try {
+      roster = await client.listAgents();
+      fleetStore.setSnapshot(roster);
+    } catch {
+      // Offline check still runs against the passed-in list.
+    }
+
+    const s = get(store);
+    const participants = roster.filter((a) => s.participants.has(a.id) && a.status !== 'offline');
+    if (participants.length === 0) {
+      store.update((st) => ({
+        ...st,
+        error: 'No one at the table is reachable right now — check the status dots in the sidebar.',
+      }));
+      return;
+    }
+
     stopRequested = false;
     store.update((st) => ({ ...st, running: true, error: null }));
-    const client = new OrchestratorClient(auth.orchestratorUrl, auth.token);
     try {
       for (const a of participants) {
         if (stopRequested) break;
