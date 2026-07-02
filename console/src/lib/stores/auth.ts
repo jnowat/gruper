@@ -10,6 +10,7 @@ export interface AuthState {
 
 const _STORE_KEY = 'gruper-console-auth';
 const _IDENTITY_KEY = 'gruper-console-identity';
+const _MANUAL_DISCONNECT_KEY = 'gruper-console-manual-disconnect';
 const _DEFAULT_URL = 'http://localhost:8080';
 
 function _base64UrlEncode(bytes: Uint8Array): string {
@@ -94,16 +95,26 @@ function createAuthStore() {
 
     async login(orchestratorUrl: string, pubkey: string, displayName?: string): Promise<void> {
       const url = orchestratorUrl.replace(/\/$/, '');
+      // Timeout matters: the splash-first ConnectDialog auto-connects with no
+      // form visible, so a request that never settles (wedged engine, squatted
+      // port) would otherwise leave the user on "Almost ready…" forever with
+      // the manual Connect button disabled. An error here surfaces the form.
       const res = await fetch(`${url}/v1/auth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pubkey, display_name: displayName ?? pubkey.slice(0, 12) }),
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
         const detail = await res.text();
-        throw new Error(`Auth failed (${res.status}): ${detail}`);
+        throw new Error(`Couldn't sign in to the engine at ${url} (${res.status}): ${detail}`);
       }
       const data: AuthTokenResponse = await res.json();
+      try {
+        sessionStorage.removeItem(_MANUAL_DISCONNECT_KEY);
+      } catch {
+        // best-effort
+      }
       store.update((s) => {
         const next = { ...s, token: data.token, userId: data.user_id, expiresAt: data.expires_at, orchestratorUrl: url };
         _persist(next);
@@ -112,11 +123,32 @@ function createAuthStore() {
     },
 
     logout() {
+      // Remember that this was an explicit disconnect, so the connect screen
+      // shows the form instead of instantly auto-reconnecting — otherwise the
+      // manual form is unreachable on a healthy desktop install.
+      try {
+        sessionStorage.setItem(_MANUAL_DISCONNECT_KEY, '1');
+      } catch {
+        // best-effort
+      }
       store.update((s) => {
         const next = { ...s, token: null, userId: null, expiresAt: null };
         _persist(next);
         return next;
       });
+    },
+
+    /** True once per explicit Disconnect (consumed by the connect screen). */
+    consumeManualDisconnect(): boolean {
+      try {
+        if (sessionStorage.getItem(_MANUAL_DISCONNECT_KEY)) {
+          sessionStorage.removeItem(_MANUAL_DISCONNECT_KEY);
+          return true;
+        }
+      } catch {
+        // best-effort
+      }
+      return false;
     },
 
     setOrchestratorUrl(url: string) {

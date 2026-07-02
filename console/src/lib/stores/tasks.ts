@@ -46,16 +46,44 @@ function createTasksStore() {
 
     applyComplete(event: TaskCompleteEvent) {
       store.update((s) => {
-        const tasks = s.tasks.map((t) =>
-          t.id === event.payload.task_id
-            ? {
-                ...t,
-                status: event.payload.final_status,
-                completed_at: new Date().toISOString(),
-              }
-            : t,
-        );
+        const { final_status, duration_ms, model_used, error_code } = event.payload;
+        const tasks = s.tasks.map((t) => {
+          if (t.id !== event.payload.task_id) return t;
+          // Fold the completion metrics into the task so the UI can show
+          // "answered in 12s" immediately, without waiting for the full
+          // result re-fetch (which is still needed for the output text).
+          const result =
+            duration_ms != null || model_used
+              ? {
+                  ...t.result,
+                  ...(duration_ms != null ? { duration_ms } : {}),
+                  ...(model_used ? { model_used } : {}),
+                }
+              : t.result;
+          const error = error_code ? { ...t.error, code: error_code } : t.error;
+          return {
+            ...t,
+            status: final_status,
+            completed_at: new Date().toISOString(),
+            result,
+            error,
+          };
+        });
         return { ...s, tasks };
+      });
+    },
+
+    /**
+     * Drop the streamed-chunk buffer for one task (the Round Table calls this
+     * once a turn settles — the transcript keeps the text, so holding every
+     * chunk of every past turn would just grow memory for the session).
+     */
+    clearProgress(taskId: string) {
+      store.update((s) => {
+        if (!(taskId in s.progress)) return s;
+        const progress = { ...s.progress };
+        delete progress[taskId];
+        return { ...s, progress };
       });
     },
 

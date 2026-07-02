@@ -6,6 +6,44 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## Gruper Distributed — `gd-0.2.x` (2026-07-01) — Desktop Experience Overhaul
+
+A structural pass at the Console's single-user experience, going after the root causes behind three rounds of recurring Windows-testing feedback (agent identity, model confusion, technical leaks, mechanical Round Table, weak first-run) rather than another layer of label polish.
+
+**Agent identity — specialties are now real, visible, and editable:**
+- ADDED: `console/src/lib/roles.ts` — a specialty catalog (icon, human label, one-line "good at" tagline, full persona) ported from Gruper Core v0.4.5's 12 agent templates; every surface that mentions a role renders from it, so `devil_advocate` reads as "😈 Devil's Advocate — argues the other side on purpose" everywhere
+- CHANGED: specialties change *behaviour*, not just badges — the persona is sent as the task's `system_prompt` (already supported end-to-end by the orchestrator and agent runtime but never used), replacing the generic "You are a focused {role} assistant" one-liner
+- CHANGED: agent cards redesigned for scanning — name, plain-language specialty line, then a quiet model + humanized status line ("ready", "working…", "having trouble"); raw enums, "seen 34s ago", and the full model list moved to the hover tooltip
+- ADDED: specialty is editable in place on the agent card (like rename), backed by an extended owner-scoped `PATCH /v1/agents/{id}` that now accepts `{name?, role?}` (+6 orchestrator tests, 46 total)
+- ADDED: agents can finally be *removed* — ✕ asks first, stops the local process, and hides the entry (persisted locally; auto-unhides if the agent ever comes back online). Dead grey rows no longer accumulate forever
+- FIXED: renames from another console session now apply live (fleet_event `name` was previously discarded)
+
+**Ask flow — one decision, in plain language:**
+- CHANGED: the composer is now "Ask a question": pick who answers from a card grid (avatar, name, specialty — no dropdown), type the question, done. Role and Data-class selects removed from the primary flow; "Answer style" (per-question role override) joins the model override under Advanced
+- CHANGED: Advanced sliders trimmed and translated (Creativity, Answer length, Context window, Time limit); the Priority slider — meaningless for a single-user desktop — is gone
+- ADDED: Ctrl/Cmd+Enter submits; the draft survives closing the dialog (a stray backdrop click no longer destroys a half-typed question)
+
+**Answers — the main event:**
+- CHANGED: completed answers lead with the text under one quiet summary line ("Answered in 12.3s · ~41 tok/s"); model/token pills moved behind a "details" toggle
+- CHANGED: failures read as plain sentences with a **Try again** button that resubmits the same question to the same agent; error codes sit behind "details"
+- FIXED: the History list and the answer pane no longer disagree about the same task — both use one shared status vocabulary (`taskDisplay.ts`); raw statuses (`dispatched`, `dead_letter`) and truncated UUIDs no longer appear anywhere outside the Debug panel
+- CHANGED: `task_complete` metrics (duration, model) now fold into the task immediately instead of being discarded until the full-result re-fetch
+
+**Round Table — a conversation, not a batch job:**
+- CHANGED: rebuilt as a group chat: the user opens with a message, everyone at the table responds in turn (streaming), and the user can interject at any time — or click "Let them keep going". No more "Start round" / "Round N" machinery
+- FIXED: the transcript now lives in a store (`stores/roundtable.ts`), so switching tabs mid-discussion no longer silently destroys the whole conversation (previously component-local state)
+- CHANGED: turns are tagged (`input.context.source = 'round_table'`) and filtered out of History, which now shows only questions the user actually asked; failed turns read as a quiet "couldn't respond this time" note instead of raw errors in the transcript; offline agents can't be seated
+- CHANGED: model tags moved out of the conversation flow into hover tooltips
+
+**First-run & chrome — no internal nouns:**
+- CHANGED: a normal desktop launch never shows a connection form — just a brief "Starting up…" splash; the manual form (engine address, device identity) appears only when the automatic path fails, or via "Advanced setup"
+- CHANGED: "Add an agent" reordered for a person: silent Ollama detection reads as one status line (with a "download Ollama" link and URL field surfaced only on failure), then name, specialty grid, and a model picker only when there's actually a choice; polling internals removed from the waiting copy
+- ADDED: a three-step first-run checklist (add an agent → ask a question → try Round Table) that checks itself off, replacing the single-step welcome card
+- CHANGED: header jargon ("orchestrator local", "live 3/4", `gd-0.2`) collapsed into one health indicator ("3 of 4 agents online") with technical detail in the tooltip; "Fleet"→"Agents", "Tasks"→"History", "+ New task"→"+ Ask"; version string moved to a tooltip
+- CHANGED: Analytics no longer shows a wall of zeroes before the first answer, and says whose numbers it's showing
+
+---
+
 ## Gruper Distributed — `gd-0.1` → `gd-0.2.x` (2026-06-27 → 2026-07-01) — Foundations Through Desktop Hardening
 
 This is the first changelog entry for Gruper Distributed. In five days the project went from a design spec to a code-complete desktop-first stack (Console + Orchestrator + Agent, SQLite by default, no Docker required) validated end-to-end on Linux, plus a detailed Phase 2 (cross-network sharing) plan. **No Gruper Core version bump** — `Gruper.html` stayed at `v0.4.5` throughout; see its own maintenance entry below for the small number of core-adjacent doc fixes made alongside this work.

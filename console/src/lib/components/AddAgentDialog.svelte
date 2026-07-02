@@ -1,5 +1,5 @@
 <!--
-  "Add Local Agent" — minimum viable agent onboarding (see ROADMAP.md WP-32).
+  "Add agent" — minimum viable agent onboarding (see ROADMAP.md WP-32).
 
   Closes the biggest gap called out across prior audits: a desktop user had
   no way to go from "Console installed" to "a task actually runs" without
@@ -26,6 +26,11 @@
        of a generic "should appear online in a few seconds" platitude
   Scope: single machine, same owner as the Console. Remote/cross-machine
   agent registration is unaffected and stays manual.
+
+  The form is ordered for a person, not the plumbing: detection runs silently
+  and reads as one status line; name and specialty lead; the model picker only
+  appears when there's actually a choice; the Ollama URL hides under Advanced
+  unless detection fails (then it surfaces right inside the guidance).
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -35,6 +40,7 @@
   import { logStore } from '$lib/stores/logs.js';
   import { OrchestratorClient } from '$lib/api/client.js';
   import { friendlyName } from '$lib/agentDisplay.js';
+  import { ROLES, roleInfo } from '$lib/roles.js';
   import type { Agent, AgentCapabilities } from '$lib/types.js';
 
   let { onclose }: { onclose: () => void } = $props();
@@ -47,14 +53,16 @@
 
   // Generate the agent's identity once so the suggested name is stable and so
   // the same key is used at registration. A memorable name ("Sage") beats a
-  // wall of "Local Agent" / "gemma3 · analyst"; the role and model show as the
-  // agent's subtitle everywhere else.
+  // wall of "Local Agent" / "gemma3 · analyst"; the specialty and model show
+  // as the agent's details everywhere else.
   const agentPubkey = generateRandomPubkey();
   const suggestedName = friendlyName(agentPubkey);
 
   let name = $state(suggestedName);
   let ollamaUrl = $state('http://localhost:11434');
   let role = $state('analyst');
+  let showAdvanced = $state(false);
+  const selectedRole = $derived(roleInfo(role));
 
   type Step = 'form' | 'registering' | 'spawning' | 'waiting' | 'done';
   let step = $state<Step>('form');
@@ -66,6 +74,12 @@
   let ollamaState = $state<OllamaState>('idle');
   let ollamaMessage = $state<string | null>(null);
   let detectedModels = $state<string[]>([]);
+  // The URL the current detection result belongs to. Editing the URL field
+  // does NOT reset the state machine (a previous version flipped to 'idle' on
+  // every keystroke, which unmounted the very input being typed into) — it
+  // just makes the result stale, which blocks submission until re-checked.
+  let lastDetectedUrl = $state('');
+  const urlDirty = $derived(lastDetectedUrl !== '' && normalizedOllamaUrl() !== lastDetectedUrl);
   // The model this agent will use by default (picked by the user, not silently
   // detectedModels[0]). Kept valid as detection results change.
   let defaultModel = $state('');
@@ -115,8 +129,7 @@
 
     if (!result.reachable) {
       ollamaState = 'unreachable';
-      ollamaMessage =
-        result.error ?? `Ollama is not running (or not reachable) at ${url}. Start Ollama, then click Retry.`;
+      ollamaMessage = result.error ?? null;
     } else if (detectedModels.length > 0) {
       ollamaState = 'ready';
       ollamaMessage = null;
@@ -125,7 +138,7 @@
       ollamaMessage = result.error;
     } else {
       ollamaState = 'no_models';
-      ollamaMessage = `Ollama is running but has no models installed. Run "ollama pull ${SUGGESTED_MODEL}" in a terminal, then click Retry.`;
+      ollamaMessage = null;
     }
   }
 
@@ -153,16 +166,12 @@
         ollamaMessage = null;
       } else {
         ollamaState = 'no_models';
-        ollamaMessage = `Ollama is running but has no models installed. Run "ollama pull ${SUGGESTED_MODEL}" in a terminal, then click Retry.`;
+        ollamaMessage = null;
       }
-    } catch (err) {
+    } catch {
       detectedModels = [];
       ollamaState = 'unreachable';
-      if (err instanceof DOMException && err.name === 'TimeoutError') {
-        ollamaMessage = `Timed out connecting to Ollama at ${url}. Is it running?`;
-      } else {
-        ollamaMessage = `Ollama is not running (or not reachable) at ${url}. Start Ollama, then click Retry.`;
-      }
+      ollamaMessage = null;
     }
   }
 
@@ -188,6 +197,7 @@
     } else {
       await detectViaBrowserFetch(url);
     }
+    lastDetectedUrl = url;
   }
 
   // Auto-run detection as soon as the dialog opens — a user shouldn't have
@@ -195,15 +205,6 @@
   onMount(() => {
     detectOllama();
   });
-
-  function onOllamaUrlInput() {
-    // The last detection result no longer applies to whatever URL is now
-    // typed in; require an explicit re-check rather than silently reusing
-    // stale results (or worse, silently allowing submission against them).
-    ollamaState = 'idle';
-    ollamaMessage = null;
-    detectedModels = [];
-  }
 
   // Set by the user clicking "Stop waiting" — checked at the top of every
   // poll iteration in waitForAgentOnline so the wait can always be cut
@@ -307,18 +308,22 @@
     timedOut = false;
 
     if (ollamaState !== 'ready' || detectedModels.length === 0) {
-      error = 'At least one Ollama model must be detected before an agent can be added.';
+      error = 'Ollama needs to be running with at least one model before an agent can be added.';
+      return;
+    }
+    if (urlDirty) {
+      error = 'The Ollama address changed since the last check — check it again first.';
       return;
     }
     if (!hasTauri) {
-      error = 'Spawning a local agent process requires the desktop app (Tauri) — this only works in the packaged/dev Console, not a plain browser tab.';
+      error = 'Starting a local agent requires the desktop app — this only works in the packaged/dev Console, not a plain browser tab.';
       return;
     }
 
     const token = authStore.getToken();
     const orchestratorUrl = authStore.getOrchestratorUrl();
     if (!token) {
-      error = 'Not connected to an orchestrator.';
+      error = 'Not connected.';
       return;
     }
 
@@ -366,7 +371,7 @@
         capabilitiesJson: JSON.stringify(capabilities),
       });
     } catch (err) {
-      error = `Agent was registered, but the local process failed to start: ${err instanceof Error ? err.message : String(err)}`;
+      error = `${name.trim() || suggestedName} was created, but its local process failed to start: ${err instanceof Error ? err.message : String(err)}`;
       step = 'form';
       return;
     }
@@ -376,7 +381,7 @@
     try {
       const result = await waitForAgentOnline(agent.id, AGENT_ONLINE_TIMEOUT_MS, client);
       if (result.outcome === 'crashed') {
-        error = `The agent process was registered and started, but exited before coming online: ${result.detail}. Check that Ollama is reachable at the URL above, then try again.`;
+        error = `${name.trim() || suggestedName} was created and started, but stopped before coming online: ${result.detail}. Check that Ollama is running, then try again.`;
         step = 'form';
         return;
       }
@@ -394,16 +399,20 @@
       // it somehow does, never leave the dialog frozen on "Waiting for
       // agent to connect" — surface it and let the user retry or check the
       // fleet manually instead.
-      error = `Agent was registered and started, but hit an unexpected error while waiting for it to come online: ${err instanceof Error ? err.message : String(err)}. Check the Fleet sidebar — it may still connect on its own.`;
+      error = `The agent was created and started, but something unexpected happened while waiting for it to come online: ${err instanceof Error ? err.message : String(err)}. Check the sidebar — it may still connect on its own.`;
       step = 'form';
     }
   }
 </script>
 
-<div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-  <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4">
+<div
+  class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+  onkeydown={(e) => { if (e.key === 'Escape') { cancelWaiting = true; onclose(); } }}
+  role="presentation"
+>
+  <div class="glass-card p-6 w-full max-w-md mx-4 space-y-4 max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between">
-      <h2 class="text-lg font-semibold text-white">Add Local Agent</h2>
+      <h2 class="text-lg font-semibold text-white">Add an agent</h2>
       <button
         onclick={() => { cancelWaiting = true; onclose(); }}
         class="text-slate-500 hover:text-slate-300 text-sm"
@@ -413,14 +422,13 @@
     {#if step === 'done'}
       {#if timedOut}
         <div class="bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm rounded-lg p-3">
-          Agent registered and the local process started, but it hasn't shown up online yet
-          (waited {Math.round(AGENT_ONLINE_TIMEOUT_MS / 1000)}s). This can happen on first run
-          while antivirus scans the freshly-installed executable — it may still connect in the
-          next few seconds. If it doesn't, check that Ollama is reachable at the URL you entered.
+          {name.trim() || suggestedName} was created and started, but hasn't come online yet.
+          This can happen on first run while antivirus checks the freshly-installed app — it may
+          still connect in the next few seconds. If it doesn't, check that Ollama is running.
         </div>
       {:else}
         <div class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm rounded-lg p-3">
-          Agent is online and ready to run tasks.
+          {name.trim() || suggestedName} is online and ready — go ahead and ask a question.
         </div>
       {/if}
       <button
@@ -431,54 +439,114 @@
       </button>
     {:else}
       <p class="text-sm text-slate-400">
-        Registers a new agent identity with this orchestrator and starts it as a local background
-        process — no config files, no manual JWT copy-paste.
+        A new AI helper that runs privately on this computer.
       </p>
 
-      <div>
-        <label class="block text-xs text-slate-400 mb-1" for="ollama-url">Ollama URL</label>
-        <div class="flex gap-2">
-          <input
-            id="ollama-url"
-            type="text"
-            bind:value={ollamaUrl}
-            oninput={onOllamaUrlInput}
-            class="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-          />
-          <button
-            type="button"
-            onclick={detectOllama}
-            disabled={ollamaState === 'checking'}
-            class="text-xs px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10 disabled:opacity-50"
-          >
-            {#if ollamaState === 'checking'}
-              Checking…
-            {:else if ollamaState === 'idle'}
-              Detect models
-            {:else}
-              Retry
-            {/if}
-          </button>
+      <!-- Ollama status — one line when fine, actionable guidance when not. -->
+      {#if ollamaState === 'checking' || ollamaState === 'idle'}
+        <p class="text-xs text-slate-500 progress-pulse">Checking for Ollama (the app that runs AI models)…</p>
+      {:else if ollamaState === 'ready'}
+        <p class="text-xs text-emerald-400">
+          ✓ Ollama is running — {detectedModels.length} model{detectedModels.length === 1 ? '' : 's'} installed.
+        </p>
+        {#if urlDirty}
+          <div class="flex items-center gap-2 text-xs text-amber-400">
+            <span class="flex-1">The Ollama address changed — check it again to continue.</span>
+            <button
+              type="button"
+              onclick={detectOllama}
+              class="px-2 py-1 rounded-lg bg-white/10 border border-white/10 text-slate-200 hover:bg-white/20"
+            >
+              Check
+            </button>
+          </div>
+        {/if}
+      {:else}
+        <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 space-y-2 text-xs">
+          {#if ollamaState === 'no_models'}
+            <p class="text-amber-300">
+              Ollama is running, but no AI models are installed yet.
+            </p>
+            <p class="text-slate-400">
+              Open a terminal and run
+              <code class="text-slate-300 bg-white/10 rounded px-1">ollama pull {SUGGESTED_MODEL}</code>
+              to download one (a few GB), then try again.
+            </p>
+          {:else}
+            <p class="text-amber-300">
+              Can't find Ollama — the free app this agent needs to run AI models.
+            </p>
+            <p class="text-slate-400">
+              If it isn't installed yet,
+              <a
+                href="https://ollama.com/download"
+                target="_blank"
+                rel="noreferrer"
+                class="text-blue-400 hover:text-blue-300 underline"
+              >download Ollama</a>, start it, then try again.
+            </p>
+          {/if}
+          {#if ollamaMessage}
+            <p class="text-slate-500">{ollamaMessage}</p>
+          {/if}
+          <div class="flex gap-2 items-center">
+            <input
+              type="text"
+              bind:value={ollamaUrl}
+              title="Where Ollama is running — the standard address is already filled in"
+              class="flex-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+            />
+            <button
+              type="button"
+              onclick={detectOllama}
+              class="text-xs px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-slate-200 hover:bg-white/20"
+            >
+              Try again
+            </button>
+          </div>
         </div>
+      {/if}
 
-        {#if ollamaState === 'ready'}
-          <p class="text-xs mt-1 text-emerald-400">
-            Found {detectedModels.length} model{detectedModels.length === 1 ? '' : 's'}.
-          </p>
-        {:else if ollamaState === 'no_models'}
-          <p class="text-xs mt-1 text-amber-400">{ollamaMessage}</p>
-        {:else if ollamaState === 'unreachable'}
-          <p class="text-xs mt-1 text-amber-400">{ollamaMessage}</p>
-        {:else if ollamaState === 'error'}
-          <p class="text-xs mt-1 text-red-400">{ollamaMessage}</p>
-        {:else if ollamaState === 'checking'}
-          <p class="text-xs mt-1 text-slate-500">Checking for installed models…</p>
+      <div>
+        <label class="block text-xs text-slate-400 mb-1" for="agent-name">Name</label>
+        <input
+          id="agent-name"
+          type="text"
+          bind:value={name}
+          placeholder={suggestedName}
+          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+        />
+        <p class="text-xs mt-1 text-slate-500">
+          Something memorable — you'll ask for it by name.
+        </p>
+      </div>
+
+      <div>
+        <span class="block text-xs text-slate-400 mb-1.5">Specialty</span>
+        <div class="grid grid-cols-3 gap-1.5" role="radiogroup" aria-label="Specialty">
+          {#each ROLES as r (r.id)}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={role === r.id}
+              onclick={() => { role = r.id; }}
+              class="flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs text-left transition-colors {role === r.id
+                ? 'border-blue-500/60 bg-blue-500/10 text-white'
+                : 'border-white/10 text-slate-400 hover:bg-white/5'}"
+            >
+              <span>{r.icon}</span>
+              <span class="truncate">{r.label}</span>
+            </button>
+          {/each}
+        </div>
+        {#if selectedRole}
+          <p class="text-xs mt-1.5 text-slate-500">{selectedRole.icon} {selectedRole.tagline}. You can change this later.</p>
         {/if}
       </div>
 
-      {#if ollamaState === 'ready' && detectedModels.length > 0}
+      {#if ollamaState === 'ready' && detectedModels.length > 1}
         <div>
-          <label class="block text-xs text-slate-400 mb-1" for="agent-default-model">Default model</label>
+          <label class="block text-xs text-slate-400 mb-1" for="agent-default-model">Model</label>
           <select
             id="agent-default-model"
             bind:value={defaultModel}
@@ -489,42 +557,50 @@
             {/each}
           </select>
           <p class="text-xs mt-1 text-slate-500">
-            The model this agent runs by default. All {detectedModels.length} detected model{detectedModels.length === 1 ? '' : 's'} stay available for per-task overrides.
+            The AI model this agent thinks with.
           </p>
         </div>
       {/if}
 
-      <div>
-        <label class="block text-xs text-slate-400 mb-1" for="agent-role">Role template</label>
-        <select
-          id="agent-role"
-          bind:value={role}
-          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          {#each ['analyst', 'creative', 'critic', 'synthesizer', 'expert', 'devil_advocate', 'philosopher', 'economist', 'ethicist', 'scientist', 'psychologist', 'engineer'] as r}
-            <option value={r} class="bg-slate-800 text-white">{r}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div>
-        <label class="block text-xs text-slate-400 mb-1" for="agent-name">Agent name</label>
-        <input
-          id="agent-name"
-          type="text"
-          bind:value={name}
-          placeholder={suggestedName}
-          class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        />
-        <p class="text-xs mt-1 text-slate-500">
-          A friendly name so you can tell this agent apart{#if defaultModel}{' '}from your others. Its model ({defaultModel}) and role show as details.{:else}.{/if}
-        </p>
-      </div>
+      {#if ollamaState === 'ready'}
+        <div>
+          <button
+            type="button"
+            onclick={() => { showAdvanced = !showAdvanced; }}
+            class="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            {showAdvanced ? '▾' : '▸'} Advanced
+          </button>
+          {#if showAdvanced}
+            <div class="mt-2">
+              <label class="block text-xs text-slate-400 mb-1" for="ollama-url">Where Ollama runs</label>
+              <div class="flex gap-2">
+                <input
+                  id="ollama-url"
+                  type="text"
+                  bind:value={ollamaUrl}
+                  class="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 font-mono"
+                />
+                <button
+                  type="button"
+                  onclick={detectOllama}
+                  class="text-xs px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10"
+                >
+                  Re-check
+                </button>
+              </div>
+              <p class="text-xs mt-1 text-slate-500">
+                Only change this if Ollama runs somewhere other than the standard address.
+              </p>
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       {#if !hasTauri}
         <div class="bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs rounded-lg p-3">
           Running outside the desktop app (e.g. a plain browser dev tab) — agent registration will
-          work, but spawning the local process requires the Tauri shell.
+          work, but starting the local process requires the desktop app.
         </div>
       {/if}
 
@@ -536,26 +612,25 @@
 
       <button
         onclick={handleSubmit}
-        disabled={step === 'registering' || step === 'spawning' || step === 'waiting' || ollamaState !== 'ready'}
-        title={ollamaState !== 'ready' ? 'At least one Ollama model must be detected first' : undefined}
+        disabled={step === 'registering' || step === 'spawning' || step === 'waiting' || ollamaState !== 'ready' || urlDirty}
+        title={ollamaState !== 'ready' || urlDirty ? 'Ollama needs to be running (and checked) with at least one model first' : undefined}
         class="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
       >
         {#if step === 'registering'}
-          Registering…
+          Creating…
         {:else if step === 'spawning'}
-          Starting agent…
+          Starting…
         {:else if step === 'waiting'}
-          Waiting for agent to connect…
+          Waiting for {name.trim() || suggestedName} to connect…
         {:else}
-          Add Agent
+          Add agent
         {/if}
       </button>
 
       {#if step === 'waiting'}
         <p class="text-xs text-slate-500 text-center">
-          Checking every {Math.round(AGENT_POLL_INTERVAL_MS / 1000)}s, up to
-          {Math.round(AGENT_ONLINE_TIMEOUT_MS / 1000)}s total. The agent is already registered and
-          running in the background even if you stop waiting now.
+          This usually takes a few seconds. The agent keeps starting in the background
+          even if you stop waiting.
         </p>
         <button
           type="button"

@@ -230,9 +230,10 @@ paths:
       operationId: updateAgent
       summary: Update agent metadata
       description: |
-        Allows the agent owner to update mutable fields: `name`, `location_tag`,
-        `jurisdiction`, `availability`. Capabilities are updated via the WebSocket
-        heartbeat, not this endpoint.
+        Allows the agent owner to update mutable fields: `name`, `role` (the
+        primary specialty, i.e. `capabilities.roles[0]`), `location_tag`,
+        `jurisdiction`, `availability`. Other capability sections (models,
+        hardware) are updated via the WebSocket heartbeat, not this endpoint.
       tags: [agents]
       security:
         - BearerAuth: []
@@ -1005,6 +1006,14 @@ components:
           type: string
           minLength: 1
           maxLength: 64
+        role:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            Primary role/specialty — replaces `capabilities.roles[0]`. A
+            dedicated field (rather than a raw capabilities patch) so this
+            endpoint cannot corrupt the models/hardware sections.
         location_tag:
           type: string
           nullable: true

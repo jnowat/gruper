@@ -22,8 +22,22 @@ export class OrchestratorClient {
       },
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText);
-      throw new Error(`${res.status} ${text}`);
+      // Error messages from here surface directly in the UI, so extract the
+      // human-readable detail instead of dumping "422 {json…}" at the user.
+      const text = await res.text().catch(() => '');
+      let message = '';
+      try {
+        const body = JSON.parse(text) as { detail?: unknown };
+        if (typeof body.detail === 'string') {
+          message = body.detail;
+        } else if (Array.isArray(body.detail)) {
+          const first = body.detail[0] as { msg?: string } | undefined;
+          message = first?.msg ?? '';
+        }
+      } catch {
+        message = text;
+      }
+      throw new Error(message || res.statusText || `Request failed (${res.status})`);
     }
     return res.json() as Promise<T>;
   }
@@ -44,9 +58,14 @@ export class OrchestratorClient {
   }
 
   renameAgent(id: string, name: string): Promise<Agent> {
+    return this.updateAgent(id, { name });
+  }
+
+  /** Update an agent's display name and/or specialty (owner only). */
+  updateAgent(id: string, body: { name?: string; role?: string }): Promise<Agent> {
     return this._fetch<Agent>(`/v1/agents/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(body),
     });
   }
 
